@@ -1,0 +1,38 @@
+# Conda environment for the smart-buildings competition simulator.
+#
+# Prefer a plain venv if the cluster provides Python 3.12:
+#
+#     python -m venv $HOME/sbenv && source $HOME/sbenv/bin/activate
+#     pip install -e .
+#
+# Use this file only when no Python 3.12 module is available, so conda has to
+# supply the interpreter.
+#
+# Note what this file deliberately does NOT do: it does not let conda resolve
+# the scientific stack. numba 0.60 supports numpy only up to 2.0, and a conda
+# solve will pull numpy 2.1+, which breaks numba at import. Every runtime
+# dependency is therefore installed by pip from the exact pins in
+# pyproject.toml, which are the single source of truth and are matched to the
+# Kaggle image the competition runs on.
+#
+#     conda env create -f environment.yml
+#     conda activate smart-buildings
+#
+# Verify afterwards:
+#     python -c "import numpy, numba; print(numpy.__version__, numba.__version__)"
+#     # expected: 2.0.2 0.60.0
+
+name: smart-buildings
+
+channels:
+  - conda-forge
+
+dependencies:
+  # conda supplies the interpreter and pip only.
+  - python=3.12
+  - pip
+
+  - pip:
+      # Installs the project plus every pinned runtime dependency from
+      # pyproject.toml. Run from the repository root.
+      - -e .

@@ -1,0 +1,12 @@
+# Keep the build context (and image) small — these aren't needed at runtime.
+.git
+.venv
+venv
+__pycache__
+*.pyc
+*.ipynb_checkpoints
+results
+report
+images
+*.mp4
+.DS_Store
