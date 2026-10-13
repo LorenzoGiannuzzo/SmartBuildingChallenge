@@ -1,9 +1,9 @@
 # Smart Buildings Foundation Model Competition — Starter Kit
 
 Develop a single control policy that operates the HVAC systems of commercial
-buildings across a range of layouts and weather conditions — deciding when to
+buildings across a range of layouts and weather conditions, deciding when to
 run each air handler and the hot-water pump, setting their temperature and
-pressure setpoints, and dividing the resulting air between zones — to jointly
+pressure setpoints, and dividing the resulting air between zones to jointly
 minimize energy cost and carbon emissions while maintaining occupant comfort.
 
 ![The controlled building and its HVAC equipment](images/device_locations.png)
