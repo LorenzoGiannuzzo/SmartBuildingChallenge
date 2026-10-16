@@ -197,6 +197,10 @@ def run_episode(job: dict) -> str:
         if v.dtype == np.float64:
             arrays[k] = v.astype(np.float32)
     arrays["obs"] = np.stack(obs_list)
+    #Lorenzo Giannuzzo: geometry features are stored with the episode so that
+    #files collected on another machine do not need the scenario folders.
+    from sbwm.geometry import zone_static_features
+    arrays["zone_static"] = zone_static_features(meta, schema)
     header = {
         "scenario": job["scenario"],
         "start": job["start"],

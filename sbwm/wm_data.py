@@ -84,7 +84,10 @@ def load_episode(path: Path) -> Episode:
         "ahu_ids", "zone_ids", "zone_rooms") else v) for k, v in sd.items()})
     meta = header["meta"]
     meta["ahu_zone_assignments"] = None
-    static = _static_for(Path(header["scenario"]), meta, schema)
+    if "zone_static" in z.files:
+        static = z["zone_static"]
+    else:
+        static = _static_for(Path(header["scenario"]), meta, schema)
 
     obs = z["obs"].astype(np.float32)
     k, v = schema.num_ahus, schema.num_zones
