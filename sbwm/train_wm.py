@@ -75,15 +75,19 @@ def evaluate(model, norm, episodes, starts_per_ep=6, horizon=144, seed=0):
             pt.append(ep.power[t])
             rew_pred.append(reward_from(ep, t, new_temp, out["power"]))
             rew_true.append(ep.reward[t])
-        pe, pt = torch.stack(pe), torch.stack(pt)
-        pow_rel.append(((pe - pt).abs().sum(0) / pt.abs().sum(0).clamp_min(1e-6)).mean(0))
+        #Lorenzo Giannuzzo: power error is aggregated over all steps, since
+        #per-window ratios explode on windows where the plant is off.
+        pow_rel.append((torch.stack(pe).reshape(-1, 2), torch.stack(pt).reshape(-1, 2)))
     model.train()
     rp, rt = torch.cat(rew_pred), torch.cat(rew_true)
+    pe = torch.cat([a for a, _ in pow_rel])
+    pt = torch.cat([b for _, b in pow_rel])
     return {
+        "power_bias_elec_gas": (pe.sum(0) / pt.sum(0).clamp_min(1e-9)).tolist(),
         "temp_mae": {h: float(np.mean(v)) for h, v in err.items()},
         "temp_mae_occupied": {h: float(np.mean(v)) if v else None for h, v in occ_err.items()},
         "persistence_mae": {h: float(np.mean(v)) for h, v in pers.items()},
-        "power_rel_err_elec_gas": torch.stack(pow_rel).mean(0).tolist(),
+        "power_rel_err_elec_gas": ((pe - pt).abs().sum(0) / pt.abs().sum(0).clamp_min(1e-9)).tolist(),
         "reward_sum_pred_vs_true": [float(rp.sum()), float(rt.sum())],
         "reward_step_mae": float((rp - rt).abs().mean()),
         "reward_corr": float(np.corrcoef(rp.numpy(), rt.numpy())[0, 1]),
