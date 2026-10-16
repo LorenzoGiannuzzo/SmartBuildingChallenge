@@ -38,7 +38,7 @@ def main():
 
     subprocess.run([sys.executable, "-m", "smart_buildings.run_floor_generator",
                     "--start-seed", str(args.start_seed), "--count", str(args.count),
-                    "--no-pdf", "--output-dir", str(bdir)],
+                    "--no-pdf", "--output-dir", bdir.as_posix()],
                    check=True, stdout=subprocess.DEVNULL)
 
     valid = 0
@@ -56,8 +56,8 @@ def main():
             print(f"{yml.stem} exists", flush=True)
             continue
         res = subprocess.run([sys.executable, "-m", "smart_buildings.run_scenario_generator",
-                              "--buildings", str(yml), "--weathers", *STATIONS,
-                              "--output-dir", str(sdir)],
+                              "--buildings", yml.as_posix(), "--weathers", *STATIONS,
+                              "--output-dir", sdir.as_posix()],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if res.returncode == 0:
             valid += 1

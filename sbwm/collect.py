@@ -35,6 +35,11 @@ def _load_env(scenario_dir: Path, start: str):
     from smart_buildings import evaluate as ev
 
     text = (scenario_dir / "config.gin").read_text()
+    #Lorenzo Giannuzzo: on Windows the official generator writes paths with
+    #backslashes, which gin reads as escape sequences; quoted strings are
+    #normalized to forward slashes, which every platform accepts.
+    text = re.sub(r"\"([^\"\n]*)\"", lambda m: '"' + m.group(1).replace("\\", "/") + '"', text)
+    text = re.sub(r"'([^'\n]*)'", lambda m: "'" + m.group(1).replace("\\", "/") + "'", text)
     text = re.sub(r"^start_timestamp = '.*'$", f"start_timestamp = '{start}'", text, flags=re.M)
     with tempfile.NamedTemporaryFile("w", suffix=".gin", delete=False) as fh:
         fh.write(text)
@@ -117,6 +122,16 @@ class ExplorationPolicy:
 
 
 def run_episode(job: dict) -> str:
+    """Run one job; errors are returned as text so the pool keeps going."""
+    try:
+        return _run_episode(job)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        return f"FAILED {Path(job['out']).name}\n{traceback.format_exc()}"
+
+
+def _run_episode(job: dict) -> str:
     from smart_buildings.smart_control.utils import conversion_utils
     from sbwm.schema import BuildingSchema
 
