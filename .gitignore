@@ -38,3 +38,9 @@ smart_buildings/test_buildings/
 smart_buildings/test_scenarios/
 **/holdout*/
 **/test_set*/
+
+# Local data and runs
+wm_data/
+wm_runs/
+logs/
+zone_static.npy
