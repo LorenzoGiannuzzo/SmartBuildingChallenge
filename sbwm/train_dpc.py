@@ -58,10 +58,20 @@ def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
     return x.detach() + lam * (x - x.detach())
 
 
-def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0):
+def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, anchor=None):
     zact, aact, hact = policy_step(policy, ro, state, ep, t, norm, hard=hard)
+    #Lorenzo Giannuzzo: optional trust region, the squared distance from the
+    #actions an anchor policy (the one that collected the latest on-policy
+    #data) would take in the same state, which keeps each update inside the
+    #region where the world model has just been corrected.
+    if anchor is not None:
+        with torch.no_grad():
+            za, aa, ha = policy_step(anchor, ro, state, ep, t, norm, hard=hard)
+        dev = ((zact - za) ** 2).mean((1, 2)) + ((aact - aa) ** 2).mean((1, 2)) + ((hact - ha) ** 2).mean(1)
+    else:
+        dev = torch.zeros(zact.shape[0])
     new_state, out, new_temp = ro.step(state, t, zact, aact, hact)
-    return new_state, reward_from(ep, t, new_temp, out["power"], comfort_scale)
+    return new_state, reward_from(ep, t, new_temp, out["power"], comfort_scale), dev
 
 
 def needs_checkpoint(ep, length: int) -> bool:
@@ -76,26 +86,32 @@ def needs_checkpoint(ep, length: int) -> bool:
 
 
 def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0,
-                   checkpoint=None, comfort_scale=1.0):
-    """Discounted predicted reward (B,) and per-step rewards (L, B)."""
+                   checkpoint=None, comfort_scale=1.0, anchor=None, return_dev=False):
+    """Discounted predicted reward (B,) and per-step rewards (L, B).
+
+    With ``return_dev`` the mean squared action distance from ``anchor`` over
+    the rollout is returned as a third value.
+    """
     from torch.utils.checkpoint import checkpoint as ckpt
 
     if checkpoint is None:
         checkpoint = needs_checkpoint(ep, length)
     ro = Rollout(model, norm, ep)
     state = ro.init_state(t0)
-    rewards = []
+    rewards, devs = [], []
     for i in range(length):
         t = t0 + i
         #Lorenzo Giannuzzo: each closed-loop step is recomputed during the
         #backward pass instead of being stored, so memory no longer grows with
         #the activations of every world-model step over the horizon.
         if checkpoint and torch.is_grad_enabled():
-            state, r = ckpt(_closed_loop_step, policy, ro, ep, norm, hard, t, state,
-                            comfort_scale, use_reentrant=False)
+            state, r, dev = ckpt(_closed_loop_step, policy, ro, ep, norm, hard, t, state,
+                                 comfort_scale, anchor, use_reentrant=False)
         else:
-            state, r = _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale)
+            state, r, dev = _closed_loop_step(policy, ro, ep, norm, hard, t, state,
+                                              comfort_scale, anchor)
         rewards.append(r)
+        devs.append(dev)
         #Lorenzo Giannuzzo: backpropagation through many world-model steps can
         #explode; the gradient carried by the state is damped geometrically,
         #so credit from h steps later is weighted by grad_decay**h.
@@ -103,6 +119,8 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
             state = {k: _damp(v, grad_decay) for k, v in state.items()}
     r = torch.stack(rewards)
     disc = gamma ** torch.arange(length, dtype=r.dtype).unsqueeze(1)
+    if return_dev:
+        return (disc * r).sum(0), r, torch.stack(devs).mean()
     return (disc * r).sum(0), r
 
 
@@ -162,6 +180,8 @@ def main():
     ap.add_argument("--comfort-scale", type=float, default=1.0,
                     help="multiplier on the predicted comfort term, to offset world-model optimism")
     ap.add_argument("--init", default=None, help="policy checkpoint to continue from")
+    ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
+    ap.add_argument("--anchor-weight", type=float, default=0.0)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -176,6 +196,14 @@ def main():
     policy = PolicyNet(**policy_args)
     if args.init:
         policy.load_state_dict(torch.load(args.init, weights_only=False)["policy"])
+    anchor = None
+    if args.anchor:
+        ack = torch.load(args.anchor, weights_only=False)
+        anchor = PolicyNet(**ack["policy_args"])
+        anchor.load_state_dict(ack["policy"])
+        anchor.eval()
+        for prm in anchor.parameters():
+            prm.requires_grad_(False)
     print(f"policy params {sum(p.numel() for p in policy.parameters())} | train eps {len(train)} "
           f"| models {len(models)}", flush=True)
     opt = torch.optim.AdamW(policy.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -192,16 +220,17 @@ def main():
         ep = train[rng.integers(len(train))]
         model = models[rng.integers(len(models))]
         t0 = torch.as_tensor(rng.integers(HIST + 2, ep.length - length - 2, args.batch))
-        ret, r = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
-                                grad_decay=args.grad_decay, comfort_scale=args.comfort_scale)
-        loss = -ret.mean() / length
+        ret, r, dev = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
+                                     grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
+                                     anchor=anchor, return_dev=True)
+        loss = -ret.mean() / length + args.anchor_weight * dev
         opt.zero_grad()
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
         opt.step()
         sched.step()
         if it % 25 == 0:
-            print(f"it {it} L={length} step_reward {r.mean().item():.4f} grad {gnorm:.3f} "
+            print(f"it {it} L={length} step_reward {r.mean().item():.4f} dev {dev.item():.4f} grad {gnorm:.3f} "
                   f"| {time.time() - t_start:.0f}s", flush=True)
         if it % args.eval_every == 0 or it == args.iters:
             res = evaluate(policy, models, norm, test, cache=eval_cache)
