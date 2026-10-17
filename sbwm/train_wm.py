@@ -124,8 +124,11 @@ def evaluate(model, norm, episodes, starts_per_ep=6, horizon=144, seed=0):
     }
 
 
-def reward_from(ep, t, temp, power):
-    """Competition reward of step t rebuilt from temperature and power."""
+def reward_from(ep, t, temp, power, comfort_scale=1.0):
+    """Competition reward of step t rebuilt from temperature and power.
+
+    ``comfort_scale`` multiplies the comfort term; 1.0 is the exact reward.
+    """
     rm = ep.reward_meta
     k = ep.schema.num_ahus
     elec_w = power[..., 0] * 80000.0 * k
@@ -133,7 +136,7 @@ def reward_from(ep, t, temp, power):
     c = ep.coef[t]
     ne = (elec_w * c[..., 0] + gas_w * c[..., 1]) / (rm["max_electricity_rate"] * c[..., 0] + rm["max_natural_gas_rate"] * c[..., 1])
     nc = (elec_w * c[..., 2] + gas_w * c[..., 3]) / (rm["max_electricity_rate"] * c[..., 2] + rm["max_natural_gas_rate"] * c[..., 3])
-    return comfort_term(ep, t, temp) - rm["energy_cost_weight"] * ne - rm["carbon_emission_weight"] * nc
+    return comfort_scale * comfort_term(ep, t, temp) - rm["energy_cost_weight"] * ne - rm["carbon_emission_weight"] * nc
 
 
 def main():

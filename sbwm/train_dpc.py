@@ -58,16 +58,44 @@ def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
     return x.detach() + lam * (x - x.detach())
 
 
-def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0):
+def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0):
+    zact, aact, hact = policy_step(policy, ro, state, ep, t, norm, hard=hard)
+    new_state, out, new_temp = ro.step(state, t, zact, aact, hact)
+    return new_state, reward_from(ep, t, new_temp, out["power"], comfort_scale)
+
+
+def needs_checkpoint(ep, length: int) -> bool:
+    """Checkpoint only when the stored activations would be large.
+
+    Activation memory grows with the horizon and roughly with N * (N + 64)
+    for N tokens (feed-forward plus attention); the threshold keeps the run
+    within a few GB on the largest generated buildings.
+    """
+    n = ep.schema.num_zones + ep.schema.num_ahus + 2
+    return length * n * (n + 64) > 500_000
+
+
+def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0,
+                   checkpoint=None, comfort_scale=1.0):
     """Discounted predicted reward (B,) and per-step rewards (L, B)."""
+    from torch.utils.checkpoint import checkpoint as ckpt
+
+    if checkpoint is None:
+        checkpoint = needs_checkpoint(ep, length)
     ro = Rollout(model, norm, ep)
     state = ro.init_state(t0)
     rewards = []
     for i in range(length):
         t = t0 + i
-        zact, aact, hact = policy_step(policy, ro, state, ep, t, norm, hard=hard)
-        state, out, new_temp = ro.step(state, t, zact, aact, hact)
-        rewards.append(reward_from(ep, t, new_temp, out["power"]))
+        #Lorenzo Giannuzzo: each closed-loop step is recomputed during the
+        #backward pass instead of being stored, so memory no longer grows with
+        #the activations of every world-model step over the horizon.
+        if checkpoint and torch.is_grad_enabled():
+            state, r = ckpt(_closed_loop_step, policy, ro, ep, norm, hard, t, state,
+                            comfort_scale, use_reentrant=False)
+        else:
+            state, r = _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale)
+        rewards.append(r)
         #Lorenzo Giannuzzo: backpropagation through many world-model steps can
         #explode; the gradient carried by the state is damped geometrically,
         #so credit from h steps later is weighted by grad_decay**h.
@@ -129,6 +157,10 @@ def main():
     ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--grad-decay", type=float, default=0.95)
+    ap.add_argument("--lengths", type=int, nargs="+", default=[24, 48, 72],
+                    help="horizon curriculum, in equal shares of the iterations")
+    ap.add_argument("--comfort-scale", type=float, default=1.0,
+                    help="multiplier on the predicted comfort term, to offset world-model optimism")
     ap.add_argument("--init", default=None, help="policy checkpoint to continue from")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
@@ -153,15 +185,15 @@ def main():
     eval_cache = {}
     t_start = time.time()
     for it in range(1, args.iters + 1):
-        #Lorenzo Giannuzzo: the horizon grows from 2 to 6 hours, long enough to
-        #see the effect of preconditioning before the comfort period.
-        frac = it / args.iters
-        length = 24 if frac < 0.3 else 48 if frac < 0.7 else 72
+        #Lorenzo Giannuzzo: the horizon grows along the curriculum (by default
+        #2, 4 and 6 hours), long enough to see the effect of preconditioning.
+        frac = (it - 1) / args.iters
+        length = args.lengths[min(int(frac * len(args.lengths)), len(args.lengths) - 1)]
         ep = train[rng.integers(len(train))]
         model = models[rng.integers(len(models))]
         t0 = torch.as_tensor(rng.integers(HIST + 2, ep.length - length - 2, args.batch))
         ret, r = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
-                                grad_decay=args.grad_decay)
+                                grad_decay=args.grad_decay, comfort_scale=args.comfort_scale)
         loss = -ret.mean() / length
         opt.zero_grad()
         loss.backward()
