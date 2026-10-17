@@ -1,0 +1,116 @@
+"""Evaluate policies in the real simulator on the official scenario windows.
+
+Each scenario is run from its own configured start date for ``--steps`` steps
+(8640 is the full official episode). Occupancy is seeded in the configs, so
+every policy sees the same occupants and weather. The score is the
+competition metric: mean absolute per-step reward, averaged over scenarios.
+
+Usage:
+    python -m sbwm.eval_policy --policies dpc pid_water --weights wm_runs/policy/policy.pt \
+        --scenarios smart_buildings/training_scenarios --steps 2016 --workers 2
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import multiprocessing as mp
+import re
+import time
+from pathlib import Path
+
+import numpy as np
+
+
+def run(job: dict) -> dict:
+    try:
+        return _run(job)
+    except Exception:  # noqa: BLE001
+        import traceback
+
+        return {**job, "error": traceback.format_exc()}
+
+
+def _run(job: dict) -> dict:
+    import torch
+
+    from sbwm.collect import _load_env
+
+    torch.set_num_threads(1)
+    scen = Path(job["scenario"])
+    start = re.search(r"^start_timestamp = '(.*)'$", (scen / "config.gin").read_text(), re.M).group(1)
+    env, meta = _load_env(scen, start)
+    spec = env.action_spec()
+    if job["policy"] == "dpc":
+        from sbwm.policy import DPCPolicy
+
+        pol = DPCPolicy(meta, spec, weights=job["weights"])
+    else:
+        from smart_buildings.evaluate import POLICY_MAP
+
+        pol = POLICY_MAP[job["policy"]](meta, spec)
+    reward_fn = env.reward_function
+    original = reward_fn.compute_reward
+    comps = []
+
+    def hook(info):
+        resp = original(info)
+        comps.append((resp.normalized_productivity_regret, resp.normalized_energy_cost,
+                      resp.normalized_carbon_emission))
+        return resp
+
+    reward_fn.compute_reward = hook
+    obs, _ = env.reset()
+    rewards = []
+    t0 = time.time()
+    for _ in range(job["steps"]):
+        a = pol.get_action(obs)
+        obs, r, term, trunc, _ = env.step({
+            "continuous_action": np.asarray(a["continuous_action"], np.float32),
+            "discrete_action": np.asarray(a["discrete_action"], np.int32)})
+        rewards.append(r)
+        if term or trunc:
+            break
+    c = np.asarray(comps[-len(rewards):])
+    return {**job, "mean_reward": float(np.mean(rewards)), "steps_done": len(rewards),
+            "comfort": float(0.6 * c[:, 0].mean()), "energy": float(-0.2 * c[:, 1].mean()),
+            "carbon": float(-0.2 * c[:, 2].mean()), "seconds": time.time() - t0}
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--policies", nargs="+", default=["dpc", "pid_water"])
+    ap.add_argument("--weights", default="wm_runs/policy/policy.pt")
+    ap.add_argument("--scenarios", default="smart_buildings/training_scenarios")
+    ap.add_argument("--filter", nargs="*", help="substrings a scenario path must contain")
+    ap.add_argument("--steps", type=int, default=2016)
+    ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--out", default=None)
+    args = ap.parse_args()
+    scen = sorted(p for p in Path(args.scenarios).glob("*/*") if (p / "config.gin").exists())
+    if args.filter:
+        scen = [p for p in scen if any(f in str(p) for f in args.filter)]
+    jobs = [{"scenario": str(s), "policy": p, "steps": args.steps, "weights": args.weights}
+            for s in scen for p in args.policies]
+    results = []
+    with mp.get_context("spawn").Pool(args.workers, maxtasksperchild=1) as pool:
+        for res in pool.imap_unordered(run, jobs):
+            if "error" in res:
+                print(f"FAILED {res['scenario']} {res['policy']}\n{res['error']}", flush=True)
+                continue
+            results.append(res)
+            name = "/".join(Path(res["scenario"]).parts[-2:])
+            print(f"{name:34s} {res['policy']:10s} reward {res['mean_reward']:.4f} "
+                  f"(comfort {res['comfort']:.4f} energy {res['energy']:.4f} carbon {res['carbon']:.4f}) "
+                  f"{res['seconds']:.0f}s", flush=True)
+    print("\nscore (mean |reward| over scenarios, lower is better)")
+    for p in args.policies:
+        rs = [r for r in results if r["policy"] == p]
+        if rs:
+            print(f"  {p:10s} {np.mean([abs(r['mean_reward']) for r in rs]):.4f}  over {len(rs)} scenarios")
+    if args.out:
+        Path(args.out).write_text(json.dumps(results, indent=1))
+
+
+if __name__ == "__main__":
+    main()

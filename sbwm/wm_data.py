@@ -58,6 +58,7 @@ class Episode:
     coef: torch.Tensor  # (T, 4) elec cost, gas cost, elec co2, gas co2 per W
     reward: torch.Tensor  # (T,)
     reward_meta: dict
+    sched: tuple = (6.0, 19.0)  # morning and evening comfort hours from the metadata
 
     @property
     def length(self) -> int:
@@ -127,7 +128,8 @@ def load_episode(path: Path) -> Episode:
         hobs=t(hobs), gobs=t(gobs), temp=t(z["zone_temp"]), occ=t(z["zone_occ"]),
         hsp=t(z["zone_hsp"]), csp=t(z["zone_csp"]), zact=t(zact), aact=t(aact),
         hact=t(hact), power=t(power), coef=t(coef.astype(np.float64) * 1e6),
-        reward=t(z["reward"]), reward_meta=header["reward"])
+        reward=t(z["reward"]), reward_meta=header["reward"],
+        sched=(float(meta["morning_start_hour"]), float(meta["evening_start_hour"])))
 
 
 @dataclass
