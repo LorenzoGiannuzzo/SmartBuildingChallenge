@@ -155,6 +155,13 @@ def main():
     ap.add_argument("--bootstrap", action="store_true",
                     help="train on a bootstrap resample of the episodes (ensemble members)")
     ap.add_argument("--zone-boost", type=float, default=3.0)
+    ap.add_argument("--init", default=None,
+                    help="fine-tune from this checkpoint, keeping its normalizer")
+    ap.add_argument("--emphasis", nargs="*", default=[],
+                    help="directories sampled with --emphasis-share probability (e.g. on-policy data)")
+    ap.add_argument("--emphasis-share", type=float, default=0.5)
+    ap.add_argument("--lengths", type=int, nargs="+", default=None,
+                    help="unroll-length curriculum in equal shares (default 1, 6, 12, 24 schedule)")
     ap.add_argument("--w-comfort", type=float, default=1.0)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
@@ -163,16 +170,22 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     train = [e for d in args.train for e in load_dir(Path(d))]
+    focus = [e for d in args.emphasis for e in load_dir(Path(d))]
     test = load_dir(Path(args.test))
     #Lorenzo Giannuzzo: the normalizer is fitted on all training episodes
     #before resampling, so that every ensemble member shares one state scale.
-    norm = Normalizer.fit(train)
+    #When fine-tuning, the checkpoint's normalizer is kept, so that a policy
+    #trained on the previous world model sees inputs on the same scale.
+    init = torch.load(args.init, weights_only=False) if args.init else None
+    norm = Normalizer.from_state_dict(init["norm"]) if init else Normalizer.fit(train + focus)
     rng = np.random.default_rng(args.seed)
     if args.bootstrap:
         train = [train[i] for i in rng.integers(0, len(train), len(train))]
-    print(f"train episodes {len(train)} steps {sum(e.length for e in train)} | test {len(test)}", flush=True)
+    print(f"train episodes {len(train)} + emphasis {len(focus)} | test {len(test)}", flush=True)
 
     model = WorldModel(d=args.d, layers=args.layers)
+    if init:
+        model.load_state_dict(init["model"])
     print("params", sum(p.numel() for p in model.parameters()), flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps, pct_start=0.05)
@@ -182,8 +195,12 @@ def main():
         #Lorenzo Giannuzzo: curriculum on the unroll length, from one-step
         #prediction to 24-step (2 h) closed-loop rollouts.
         frac = step / args.steps
-        length = 1 if frac < 0.15 else 6 if frac < 0.4 else 12 if frac < 0.7 else 24
-        ep = train[rng.integers(len(train))]
+        if args.lengths:
+            length = args.lengths[min(int((step - 1) / args.steps * len(args.lengths)), len(args.lengths) - 1)]
+        else:
+            length = 1 if frac < 0.15 else 6 if frac < 0.4 else 12 if frac < 0.7 else 24
+        pool = focus if focus and rng.random() < args.emphasis_share else train
+        ep = pool[rng.integers(len(pool))]
         hi = ep.length - length - 2
         t0 = torch.as_tensor(rng.integers(HIST + 2, hi, args.batch))
         loss, parts = unroll_loss(model, norm, ep, t0, length,
