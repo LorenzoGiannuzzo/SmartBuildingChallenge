@@ -53,7 +53,12 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
     return policy(zin, ain, hin, gin, ro.rel, hard=hard)
 
 
-def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True):
+def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
+    """Same value, gradient through the recurrence scaled by lam."""
+    return x.detach() + lam * (x - x.detach())
+
+
+def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0):
     """Discounted predicted reward (B,) and per-step rewards (L, B)."""
     ro = Rollout(model, norm, ep)
     state = ro.init_state(t0)
@@ -63,6 +68,11 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True):
         zact, aact, hact = policy_step(policy, ro, state, ep, t, norm, hard=hard)
         state, out, new_temp = ro.step(state, t, zact, aact, hact)
         rewards.append(reward_from(ep, t, new_temp, out["power"]))
+        #Lorenzo Giannuzzo: backpropagation through many world-model steps can
+        #explode; the gradient carried by the state is damped geometrically,
+        #so credit from h steps later is weighted by grad_decay**h.
+        if grad_decay < 1.0:
+            state = {k: _damp(v, grad_decay) for k, v in state.items()}
     r = torch.stack(rewards)
     disc = gamma ** torch.arange(length, dtype=r.dtype).unsqueeze(1)
     return (disc * r).sum(0), r
@@ -108,6 +118,7 @@ def main():
     ap.add_argument("--d", type=int, default=64)
     ap.add_argument("--layers", type=int, default=3)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--grad-decay", type=float, default=0.95)
     ap.add_argument("--init", default=None, help="policy checkpoint to continue from")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
@@ -138,7 +149,8 @@ def main():
         ep = train[rng.integers(len(train))]
         model = models[rng.integers(len(models))]
         t0 = torch.as_tensor(rng.integers(HIST + 2, ep.length - length - 2, args.batch))
-        ret, r = rollout_return(policy, model, norm, ep, t0, length, args.gamma)
+        ret, r = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
+                                grad_decay=args.grad_decay)
         loss = -ret.mean() / length
         opt.zero_grad()
         loss.backward()
