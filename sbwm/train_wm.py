@@ -202,7 +202,10 @@ def main():
         pool = focus if focus and rng.random() < args.emphasis_share else train
         ep = pool[rng.integers(len(pool))]
         hi = ep.length - length - 2
-        t0 = torch.as_tensor(rng.integers(HIST + 2, hi, args.batch))
+        #Lorenzo Giannuzzo: long unrolls on large buildings get a smaller batch,
+        #so that the activation memory stays bounded with many episodes loaded.
+        batch = args.batch if length < 12 else max(8, min(args.batch, int(args.batch * 40 / ep.schema.num_zones)))
+        t0 = torch.as_tensor(rng.integers(HIST + 2, hi, batch))
         loss, parts = unroll_loss(model, norm, ep, t0, length,
                                   w_comfort=args.w_comfort, zone_boost=args.zone_boost)
         opt.zero_grad()
