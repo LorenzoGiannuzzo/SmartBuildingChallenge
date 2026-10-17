@@ -28,6 +28,10 @@ import pandas as pd
 
 MODES = ("pid", "pid_noise", "random_hold", "off", "max_heat", "max_cool")
 MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05])
+#Lorenzo Giannuzzo: on-policy collection, the "pid" modes run the DPC policy
+#instead, mostly as is and partly with action noise, so that the world model
+#is corrected exactly in the states the policy visits.
+ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0])
 
 
 def _load_env(scenario_dir: Path, start: str):
@@ -55,10 +59,17 @@ def _load_env(scenario_dir: Path, start: str):
 class ExplorationPolicy:
     """Switches between behaviour modes on random segments of 0.5 to 6 hours."""
 
-    def __init__(self, meta, action_spec, schema, rng: np.random.Generator):
+    def __init__(self, meta, action_spec, schema, rng: np.random.Generator, dpc_weights=None):
         from smart_buildings.baselines.pid_plus import PIDWaterResetPolicy
 
-        self.pid = PIDWaterResetPolicy(meta, action_spec)
+        if dpc_weights:
+            from sbwm.policy import DPCPolicy
+
+            self.pid = DPCPolicy(meta, action_spec, weights=dpc_weights)
+            self.weights, self.noise = ON_POLICY_WEIGHTS, 0.2
+        else:
+            self.pid = PIDWaterResetPolicy(meta, action_spec)
+            self.weights, self.noise = MODE_WEIGHTS, 0.35
         self.s = schema
         self.rng = rng
         self.mode = "pid"
@@ -67,7 +78,7 @@ class ExplorationPolicy:
         self.hold_d = None
 
     def _new_segment(self):
-        self.mode = MODES[self.rng.choice(len(MODES), p=MODE_WEIGHTS)]
+        self.mode = MODES[self.rng.choice(len(MODES), p=self.weights)]
         self.left = int(self.rng.integers(6, 73))
         s = self.s
         if self.mode == "random_hold":
@@ -106,7 +117,7 @@ class ExplorationPolicy:
         c = np.asarray(base["continuous_action"], np.float32).copy()
         d = np.asarray(base["discrete_action"], np.int32).copy()
         if self.mode == "pid_noise":
-            c = np.clip(c + self.rng.normal(0, 0.35, c.shape), -1, 1).astype(np.float32)
+            c = np.clip(c + self.rng.normal(0, self.noise, c.shape), -1, 1).astype(np.float32)
             flip = self.rng.random(d.shape) < 0.05
             d = np.where(flip, 1 - d, d).astype(np.int32)
         elif self.mode == "random_hold":
@@ -141,7 +152,7 @@ def _run_episode(job: dict) -> str:
     rng = np.random.default_rng(job["seed"])
     env, meta = _load_env(Path(job["scenario"]), job["start"])
     schema = BuildingSchema.from_meta(meta)
-    policy = ExplorationPolicy(meta, env.action_spec(), schema, rng)
+    policy = ExplorationPolicy(meta, env.action_spec(), schema, rng, job.get("dpc_weights"))
 
     #Lorenzo Giannuzzo: the reward function is wrapped so that the exact
     #RewardInfo used by the environment is captured without calling the
@@ -237,7 +248,7 @@ def _run_episode(job: dict) -> str:
 
 
 def build_jobs(scen_root: Path, out_root: Path, n: int, steps: int, seed: int,
-               stations=None) -> list[dict]:
+               stations=None, dpc_weights=None) -> list[dict]:
     rng = np.random.default_rng(seed)
     scen = sorted(p for p in scen_root.glob("*/*") if (p / "config.gin").exists())
     if stations:
@@ -254,7 +265,8 @@ def build_jobs(scen_root: Path, out_root: Path, n: int, steps: int, seed: int,
         start = f"{day:%Y-%m-%d} 06:00"
         name = f"{sc.parent.name}__{sc.name}__{day:%m%d}__s{seed}_{i:04d}.npz"
         jobs.append({"scenario": str(sc), "start": start, "steps": steps,
-                     "seed": int(seed * 100000 + i), "out": str(out_root / name)})
+                     "seed": int(seed * 100000 + i), "out": str(out_root / name),
+                     "dpc_weights": dpc_weights})
     return jobs
 
 
@@ -267,9 +279,11 @@ def main():
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--stations", nargs="*")
+    ap.add_argument("--dpc-weights", default=None,
+                    help="collect on-policy data with this DPC policy instead of pid_water")
     args = ap.parse_args()
     jobs = build_jobs(Path(args.scenarios), Path(args.out), args.episodes,
-                      args.steps, args.seed, args.stations)
+                      args.steps, args.seed, args.stations, args.dpc_weights)
     if args.workers == 1:
         for job in jobs:
             print(run_episode(job), flush=True)
