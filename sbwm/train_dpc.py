@@ -79,28 +79,38 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
 
 
 @torch.no_grad()
-def evaluate(policy, models, norm, episodes, horizon=144, starts=4, seed=0):
-    """Mean predicted per-step reward of the policy versus the logged actions."""
+def evaluate(policy, models, norm, episodes, horizon=144, starts=3, seed=0, cache=None):
+    """Mean predicted per-step reward of the policy versus the logged actions.
+
+    The logged-action reference does not depend on the policy, so it is
+    computed once and kept in ``cache``.
+    """
     rng = np.random.default_rng(seed)
-    pol, logged_pred, logged_true = [], [], []
+    pol = []
+    first = cache is not None and not cache
     for ep in episodes:
         hi = ep.length - horizon - 2
         t0 = torch.as_tensor(rng.integers(HIST + 2, hi, starts))
         for m in models:
             _, r = rollout_return(policy, m, norm, ep, t0, horizon, 1.0)
             pol.append(r.mean().item())
-            ro = Rollout(m, norm, ep)
-            state = ro.init_state(t0)
-            rl = []
-            for i in range(horizon):
-                t = t0 + i
-                state, out, nt = ro.step(state, t, ep.zact[t], ep.aact[t], ep.hact[t])
-                rl.append(reward_from(ep, t, nt, out["power"]))
-            logged_pred.append(torch.stack(rl).mean().item())
-        idx = (t0.unsqueeze(1) + torch.arange(horizon)).reshape(-1)
-        logged_true.append(ep.reward[idx].mean().item())
-    return {"policy_pred": float(np.mean(pol)), "logged_pred": float(np.mean(logged_pred)),
-            "logged_true": float(np.mean(logged_true))}
+            if first:
+                ro = Rollout(m, norm, ep)
+                state = ro.init_state(t0)
+                rl = []
+                for i in range(horizon):
+                    t = t0 + i
+                    state, out, nt = ro.step(state, t, ep.zact[t], ep.aact[t], ep.hact[t])
+                    rl.append(reward_from(ep, t, nt, out["power"]))
+                cache.setdefault("pred", []).append(torch.stack(rl).mean().item())
+        if first:
+            idx = (t0.unsqueeze(1) + torch.arange(horizon)).reshape(-1)
+            cache.setdefault("true", []).append(ep.reward[idx].mean().item())
+    res = {"policy_pred": float(np.mean(pol))}
+    if cache:
+        res["logged_pred"] = float(np.mean(cache["pred"]))
+        res["logged_true"] = float(np.mean(cache["true"]))
+    return res
 
 
 def main():
@@ -140,6 +150,7 @@ def main():
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.iters)
     log = []
     best = -1e9
+    eval_cache = {}
     t_start = time.time()
     for it in range(1, args.iters + 1):
         #Lorenzo Giannuzzo: the horizon grows from 2 to 6 hours, long enough to
@@ -161,13 +172,14 @@ def main():
             print(f"it {it} L={length} step_reward {r.mean().item():.4f} grad {gnorm:.3f} "
                   f"| {time.time() - t_start:.0f}s", flush=True)
         if it % args.eval_every == 0 or it == args.iters:
-            res = evaluate(policy, models, norm, test)
+            res = evaluate(policy, models, norm, test, cache=eval_cache)
             res["it"] = it
             log.append(res)
             print(json.dumps(res), flush=True)
             ck = {"policy": policy.state_dict(), "policy_args": policy_args,
                   "norm": norm.state_dict(), "wm": args.wm, "it": it, "eval": res}
             torch.save(ck, out / "policy_last.pt")
+            torch.save(ck, out / f"policy_it{it:05d}.pt")
             if res["policy_pred"] > best:
                 best = res["policy_pred"]
                 torch.save(ck, out / "policy.pt")

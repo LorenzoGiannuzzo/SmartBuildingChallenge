@@ -108,6 +108,16 @@ def main():
         rs = [r for r in results if r["policy"] == p]
         if rs:
             print(f"  {p:10s} {np.mean([abs(r['mean_reward']) for r in rs]):.4f}  over {len(rs)} scenarios")
+    #Lorenzo Giannuzzo: on full official episodes the shipped baseline returns
+    #are directly comparable, so they are printed on the same scenarios.
+    ref = Path("baseline_returns.json")
+    if args.steps == 8640 and ref.exists():
+        base = json.loads(ref.read_text())
+        keys = sorted({"/".join(Path(r["scenario"]).parts[-2:]) for r in results} & set(base))
+        if keys:
+            print("  official baselines on the same scenarios:")
+            for b in ("bang_bang", "fixed_setpoint", "pid", "pid_water"):
+                print(f"  {b:14s} {np.mean([abs(base[k][b]) / 8640 for k in keys]):.4f}")
     if args.out:
         Path(args.out).write_text(json.dumps(results, indent=1))
 
