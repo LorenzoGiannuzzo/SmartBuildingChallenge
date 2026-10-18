@@ -1,0 +1,38 @@
+building_train_1/fairbanks_1       dpc        reward -0.1181 (comfort -0.0685 energy -0.0146 carbon -0.0351) 788s
+building_train_1/phoenix_5         dpc        reward -0.0633 (comfort -0.0476 energy -0.0121 carbon -0.0036) 796s
+building_train_1/denver_7          dpc        reward -0.0074 (comfort -0.0039 energy -0.0015 carbon -0.0020) 799s
+building_train_1/atlanta_2         dpc        reward -0.0119 (comfort -0.0069 energy -0.0024 carbon -0.0026) 799s
+building_train_1/singapore_8       dpc        reward -0.0239 (comfort -0.0163 energy -0.0056 carbon -0.0020) 830s
+building_train_2/atlanta_3         dpc        reward -0.0160 (comfort -0.0123 energy -0.0028 carbon -0.0010) 1494s
+building_train_2/denver_8          dpc        reward -0.0231 (comfort -0.0184 energy -0.0018 carbon -0.0029) 1496s
+building_train_2/fairbanks_2       dpc        reward -0.0455 (comfort -0.0339 energy -0.0033 carbon -0.0082) 1500s
+building_train_2/phoenix_6         dpc        reward -0.0305 (comfort -0.0222 energy -0.0064 carbon -0.0019) 1497s
+building_train_4/atlanta_5         dpc        reward -0.0275 (comfort -0.0200 energy -0.0056 carbon -0.0018) 1158s
+building_train_4/denver_2          dpc        reward -0.0221 (comfort -0.0160 energy -0.0020 carbon -0.0041) 1158s
+building_train_2/singapore_1       dpc        reward -0.0204 (comfort -0.0149 energy -0.0042 carbon -0.0014) 1539s
+building_train_4/fairbanks_4       dpc        reward -0.0088 (comfort -0.0057 energy -0.0017 carbon -0.0014) 1145s
+building_train_4/phoenix_8         dpc        reward -0.0088 (comfort -0.0059 energy -0.0018 carbon -0.0012) 1125s
+building_train_4/singapore_3       dpc        reward -0.0289 (comfort -0.0208 energy -0.0062 carbon -0.0019) 1122s
+building_train_5/atlanta_6         dpc        reward -0.0166 (comfort -0.0116 energy -0.0037 carbon -0.0012) 1148s
+building_train_5/denver_3          dpc        reward -0.0181 (comfort -0.0131 energy -0.0017 carbon -0.0033) 1110s
+building_train_5/fairbanks_5       dpc        reward -0.0071 (comfort -0.0045 energy -0.0017 carbon -0.0008) 1105s
+building_train_5/phoenix_1         dpc        reward -0.0117 (comfort -0.0082 energy -0.0015 carbon -0.0021) 1119s
+building_train_7/atlanta_8         dpc        reward -0.0255 (comfort -0.0184 energy -0.0023 carbon -0.0048) 495s
+building_train_5/singapore_4       dpc        reward -0.0239 (comfort -0.0176 energy -0.0048 carbon -0.0015) 1102s
+building_train_7/denver_5          dpc        reward -0.0169 (comfort -0.0112 energy -0.0040 carbon -0.0017) 493s
+building_train_7/fairbanks_7       dpc        reward -0.0344 (comfort -0.0253 energy -0.0026 carbon -0.0065) 494s
+building_train_7/phoenix_3         dpc        reward -0.0235 (comfort -0.0164 energy -0.0051 carbon -0.0019) 488s
+building_train_7/singapore_6       dpc        reward -0.0233 (comfort -0.0162 energy -0.0052 carbon -0.0020) 485s
+building_train_8/atlanta_1         dpc        reward -0.0161 (comfort -0.0094 energy -0.0023 carbon -0.0044) 448s
+building_train_8/denver_6          dpc        reward -0.0105 (comfort -0.0054 energy -0.0033 carbon -0.0018) 448s
+building_train_8/fairbanks_8       dpc        reward -0.0790 (comfort -0.0486 energy -0.0085 carbon -0.0219) 414s
+building_train_8/phoenix_4         dpc        reward -0.0364 (comfort -0.0232 energy -0.0097 carbon -0.0035) 339s
+building_train_8/singapore_7       dpc        reward -0.0185 (comfort -0.0109 energy -0.0053 carbon -0.0023) 306s
+
+score (mean |reward| over scenarios, lower is better)
+  dpc        0.0273  over 30 scenarios
+  official baselines on the same scenarios:
+  bang_bang      0.2252
+  fixed_setpoint 0.0659
+  pid            0.0674
+  pid_water      0.0541
