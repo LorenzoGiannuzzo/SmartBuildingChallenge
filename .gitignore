@@ -31,6 +31,8 @@ env/
 # anything.
 results/
 smart_buildings/results/
+# The curated results tree at the repository root is tracked.
+!/results/
 
 # Holdout data must never enter this repo. These rules are a backstop in case a
 # generator is ever pointed at the default output path.

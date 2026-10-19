@@ -43,12 +43,21 @@ def _legend(ax, ncol):
     return leg
 
 
-def _save(fig, name):
+def _default_saver(fig, name):
     OUT.mkdir(parents=True, exist_ok=True)
     fig.savefig(OUT / f"{name}.png")
     fig.savefig(OUT / f"{name}.pdf")
-    plt.close(fig)
     print("wrote", OUT / f"{name}.png")
+
+
+#Lorenzo Giannuzzo: the saver can be replaced by other scripts (for example
+#sbwm.build_results, which writes PDF and JPG into separate folders).
+SAVER = _default_saver
+
+
+def _save(fig, name):
+    SAVER(fig, name)
+    plt.close(fig)
 
 
 def official_scores():
