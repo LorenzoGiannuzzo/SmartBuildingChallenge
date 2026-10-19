@@ -97,8 +97,14 @@ def main():
     #restart, so a long evaluation can be interrupted and resumed.
     if args.out and Path(args.out).exists():
         results = json.loads(Path(args.out).read_text())
-        done = {(Path(r["scenario"]).as_posix(), r["policy"], r["steps"], r["weights"]) for r in results}
-        jobs = [j for j in jobs if (Path(j["scenario"]).as_posix(), j["policy"], j["steps"], j["weights"]) not in done]
+        #Lorenzo Giannuzzo: baselines do not depend on the policy weights, so their
+        #runs are reused whatever --weights is.
+        def key(r):
+            w = r["weights"] if r["policy"] == "dpc" else None
+            return Path(r["scenario"]).as_posix(), r["policy"], r["steps"], w
+
+        done = {key(r) for r in results}
+        jobs = [j for j in jobs if key(j) not in done]
         print(f"resuming: {len(results)} runs already done, {len(jobs)} to go", flush=True)
     with mp.get_context("spawn").Pool(args.workers, maxtasksperchild=1) as pool:
         for res in pool.imap_unordered(run, jobs):
