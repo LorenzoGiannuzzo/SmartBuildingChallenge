@@ -1,0 +1,5 @@
+World Model,Temperature MAE 5 Min [K],Temperature MAE 1 H [K],Temperature MAE 6 H [K],Temperature MAE 12 H [K],Persistence MAE 5 Min [K],Persistence MAE 1 H [K],Persistence MAE 6 H [K],Persistence MAE 12 H [K],Reward Correlation,Comfort Captured [%]
+World Model v1,0.276,0.65,1.462,1.665,0.466,1.347,3.344,4.166,0.895,
+World Model v2,0.283,0.642,1.403,1.764,0.466,1.347,3.344,4.166,0.888,62.0
+World Model v3,0.262,0.64,1.441,1.733,0.466,1.347,3.344,4.166,0.889,56.4
+World Model v4,0.266,0.628,1.336,1.652,0.466,1.347,3.344,4.166,0.905,69.0
