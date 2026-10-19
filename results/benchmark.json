@@ -1,0 +1,50 @@
+[
+ {
+  "scenario": "bench_data/scenarios/building_2000/atlanta_1",
+  "policy": "pid_water",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.029456787741681846,
+  "steps_done": 2016,
+  "comfort": -0.027113887461988877,
+  "energy": -0.0016422184451336025,
+  "carbon": -0.0007006817847988194,
+  "seconds": 151.0210099220276
+ },
+ {
+  "scenario": "bench_data/scenarios/building_2000/atlanta_1",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.010799865006552013,
+  "steps_done": 2016,
+  "comfort": -0.00744269012458452,
+  "energy": -0.00189162716197587,
+  "carbon": -0.0014655477218231587,
+  "seconds": 158.75971508026123
+ },
+ {
+  "scenario": "bench_data/scenarios/building_2001/atlanta_1",
+  "policy": "pid_water",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.031022545889851608,
+  "steps_done": 2016,
+  "comfort": -0.02523959514757215,
+  "energy": -0.004685673344269052,
+  "carbon": -0.0010972774490237642,
+  "seconds": 123.56277632713318
+ },
+ {
+  "scenario": "bench_data/scenarios/building_2001/atlanta_1",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.02809754381503779,
+  "steps_done": 2016,
+  "comfort": -0.022262092087588652,
+  "energy": -0.004393885839285597,
+  "carbon": -0.0014415659041559137,
+  "seconds": 129.9393970966339
+ }
+]
