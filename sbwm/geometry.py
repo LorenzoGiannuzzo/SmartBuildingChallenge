@@ -10,7 +10,21 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 
-from smart_buildings.smart_control.simulator import building_utils
+try:
+    from smart_buildings.smart_control.simulator import building_utils
+except ImportError as err:
+    #Lorenzo Giannuzzo: the floor-plan preprocessing only needs gin for a
+    #decorator elsewhere in the module, so a minimal stand-in is enough where
+    #gin-config is not installed (for example a bare Kaggle notebook image).
+    if "gin" not in str(err):
+        raise
+    import sys
+    import types
+
+    _gin = types.ModuleType("gin")
+    _gin.configurable = lambda *a, **k: (a[0] if a and callable(a[0]) else (lambda f: f))
+    sys.modules["gin"] = _gin
+    from smart_buildings.smart_control.simulator import building_utils
 from smart_buildings.smart_control.simulator import constants
 
 ZONE_STATIC_FIELDS = (
