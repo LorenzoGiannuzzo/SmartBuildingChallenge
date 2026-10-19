@@ -24,7 +24,7 @@ import torch
 
 from sbwm.policy import N_OBS_HIST, PolicyNet, build_inputs
 from sbwm.train_wm import reward_from
-from sbwm.wm_data import HIST, Normalizer, load_dir
+from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
 
 assert HIST + 1 >= N_OBS_HIST + 1
@@ -180,6 +180,8 @@ def main():
     ap.add_argument("--comfort-scale", type=float, default=1.0,
                     help="multiplier on the predicted comfort term, to offset world-model optimism")
     ap.add_argument("--init", default=None, help="policy checkpoint to continue from")
+    ap.add_argument("--pool", type=int, default=0, help="start-state episodes in memory (0: all)")
+    ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
     args = ap.parse_args()
@@ -190,7 +192,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     models, norm = load_models(args.wm)
-    train = [e for d in args.train for e in load_dir(Path(d))]
+    train = EpisodePool(list_files(args.train), args.pool, rng, args.refresh)
     test = load_dir(Path(args.test))
     policy_args = {"d": args.d, "layers": args.layers}
     policy = PolicyNet(**policy_args)
@@ -217,7 +219,8 @@ def main():
         #2, 4 and 6 hours), long enough to see the effect of preconditioning.
         frac = (it - 1) / args.iters
         length = args.lengths[min(int(frac * len(args.lengths)), len(args.lengths) - 1)]
-        ep = train[rng.integers(len(train))]
+        train.maybe_refresh()
+        ep = train.sample()
         model = models[rng.integers(len(models))]
         t0 = torch.as_tensor(rng.integers(HIST + 2, ep.length - length - 2, args.batch))
         ret, r, dev = rollout_return(policy, model, norm, ep, t0, length, args.gamma,

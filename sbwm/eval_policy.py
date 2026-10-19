@@ -93,12 +93,22 @@ def main():
     jobs = [{"scenario": str(s), "policy": p, "steps": args.steps, "weights": args.weights}
             for s in scen for p in args.policies]
     results = []
+    #Lorenzo Giannuzzo: results are saved after every run and reused on a
+    #restart, so a long evaluation can be interrupted and resumed.
+    if args.out and Path(args.out).exists():
+        results = json.loads(Path(args.out).read_text())
+        done = {(Path(r["scenario"]).as_posix(), r["policy"], r["steps"], r["weights"]) for r in results}
+        jobs = [j for j in jobs if (Path(j["scenario"]).as_posix(), j["policy"], j["steps"], j["weights"]) not in done]
+        print(f"resuming: {len(results)} runs already done, {len(jobs)} to go", flush=True)
     with mp.get_context("spawn").Pool(args.workers, maxtasksperchild=1) as pool:
         for res in pool.imap_unordered(run, jobs):
             if "error" in res:
                 print(f"FAILED {res['scenario']} {res['policy']}\n{res['error']}", flush=True)
                 continue
             results.append(res)
+            if args.out:
+                Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+                Path(args.out).write_text(json.dumps(results, indent=1))
             name = "/".join(Path(res["scenario"]).parts[-2:])
             print(f"{name:34s} {res['policy']:10s} reward {res['mean_reward']:.4f} "
                   f"(comfort {res['comfort']:.4f} energy {res['energy']:.4f} carbon {res['carbon']:.4f}) "
@@ -118,8 +128,6 @@ def main():
             print("  official baselines on the same scenarios:")
             for b in ("bang_bang", "fixed_setpoint", "pid", "pid_water"):
                 print(f"  {b:14s} {np.mean([abs(base[k][b]) / 8640 for k in keys]):.4f}")
-    if args.out:
-        Path(args.out).write_text(json.dumps(results, indent=1))
 
 
 if __name__ == "__main__":

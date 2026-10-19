@@ -175,3 +175,45 @@ def load_dir(path: Path, limit: int | None = None) -> list[Episode]:
     files = sorted(Path(path).glob("*.npz"))
     files = [f for f in files if not f.name.endswith(".tmp.npz")]
     return [load_episode(f) for f in files[:limit]]
+
+
+def list_files(dirs) -> list[Path]:
+    files = []
+    for d in dirs:
+        files += [f for f in sorted(Path(d).glob("*.npz")) if not f.name.endswith(".tmp.npz")]
+    return files
+
+
+class EpisodePool:
+    """A random subset of episodes kept in memory and refreshed periodically.
+
+    With ``size`` 0 (or at least the number of files) every episode is loaded
+    once and kept, which is the behaviour for small datasets. Larger datasets
+    (for example month-long episodes on many buildings) are streamed: ``size``
+    episodes are in memory at any time and ``maybe_refresh`` swaps in a new
+    random subset every ``every`` calls.
+    """
+
+    def __init__(self, files, size: int, rng, every: int = 300):
+        self.files = list(files)
+        self.size = size if size and size < len(self.files) else len(self.files)
+        self.rng = rng
+        self.every = every
+        self.calls = 0
+        self.episodes: list[Episode] = []
+        self.refresh()
+
+    def refresh(self):
+        idx = self.rng.choice(len(self.files), self.size, replace=False) if self.files else []
+        self.episodes = [load_episode(self.files[i]) for i in sorted(idx)]
+
+    def maybe_refresh(self):
+        self.calls += 1
+        if self.size < len(self.files) and self.calls % self.every == 0:
+            self.refresh()
+
+    def sample(self) -> Episode:
+        return self.episodes[self.rng.integers(len(self.episodes))]
+
+    def __len__(self):
+        return len(self.episodes)

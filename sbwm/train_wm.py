@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from sbwm.wm_data import AHU_DYN, HIST, ZONE_DYN, Normalizer, load_dir
+from sbwm.wm_data import AHU_DYN, HIST, ZONE_DYN, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
 
 HORIZONS = (1, 12, 72, 144)  # 5 min, 1 h, 6 h, 12 h
@@ -160,6 +160,9 @@ def main():
     ap.add_argument("--emphasis", nargs="*", default=[],
                     help="directories sampled with --emphasis-share probability (e.g. on-policy data)")
     ap.add_argument("--emphasis-share", type=float, default=0.5)
+    ap.add_argument("--pool", type=int, default=0,
+                    help="episodes kept in memory per source (0: load all); larger datasets are streamed")
+    ap.add_argument("--refresh", type=int, default=300, help="steps between pool refreshes")
     ap.add_argument("--lengths", type=int, nargs="+", default=None,
                     help="unroll-length curriculum in equal shares (default 1, 6, 12, 24 schedule)")
     ap.add_argument("--w-comfort", type=float, default=1.0)
@@ -169,19 +172,22 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
-    train = [e for d in args.train for e in load_dir(Path(d))]
-    focus = [e for d in args.emphasis for e in load_dir(Path(d))]
-    test = load_dir(Path(args.test))
-    #Lorenzo Giannuzzo: the normalizer is fitted on all training episodes
-    #before resampling, so that every ensemble member shares one state scale.
-    #When fine-tuning, the checkpoint's normalizer is kept, so that a policy
-    #trained on the previous world model sees inputs on the same scale.
-    init = torch.load(args.init, weights_only=False) if args.init else None
-    norm = Normalizer.from_state_dict(init["norm"]) if init else Normalizer.fit(train + focus)
     rng = np.random.default_rng(args.seed)
+    train_files = list_files(args.train)
     if args.bootstrap:
-        train = [train[i] for i in rng.integers(0, len(train), len(train))]
-    print(f"train episodes {len(train)} + emphasis {len(focus)} | test {len(test)}", flush=True)
+        train_files = [train_files[i] for i in rng.integers(0, len(train_files), len(train_files))]
+    train = EpisodePool(train_files, args.pool, rng, args.refresh)
+    focus = EpisodePool(list_files(args.emphasis), args.pool, rng, args.refresh) if args.emphasis else None
+    test = load_dir(Path(args.test))
+    #Lorenzo Giannuzzo: the normalizer is fitted on the training episodes in
+    #memory (all of them for small datasets). When fine-tuning, the checkpoint's
+    #normalizer is kept, so that a policy trained on the previous world model
+    #sees inputs on the same scale.
+    init = torch.load(args.init, weights_only=False) if args.init else None
+    eps0 = train.episodes + (focus.episodes if focus else [])
+    norm = Normalizer.from_state_dict(init["norm"]) if init else Normalizer.fit(eps0)
+    print(f"train files {len(train_files)} (in memory {len(train)}) + emphasis "
+          f"{len(focus.files) if focus else 0} | test {len(test)}", flush=True)
 
     model = WorldModel(d=args.d, layers=args.layers)
     if init:
@@ -200,7 +206,8 @@ def main():
         else:
             length = 1 if frac < 0.15 else 6 if frac < 0.4 else 12 if frac < 0.7 else 24
         pool = focus if focus and rng.random() < args.emphasis_share else train
-        ep = pool[rng.integers(len(pool))]
+        pool.maybe_refresh()
+        ep = pool.sample()
         hi = ep.length - length - 2
         #Lorenzo Giannuzzo: long unrolls on large buildings get a smaller batch,
         #so that the activation memory stays bounded with many episodes loaded.

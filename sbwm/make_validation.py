@@ -1,15 +1,15 @@
 """Generate an independent validation set of unseen buildings.
 
-Buildings use seeds never used for training (default 700 onwards). The first
-``--small`` valid buildings are rescaled to the footprint range of the six
-shipped buildings; the next ``--large`` keep the generator's default
-footprint (400-700 ft by 300-500 ft), which yields larger buildings than any
-seen in training. Each building is paired with one official weather strip,
+Buildings use seeds never used for training (default 700 onwards). Every
+third valid building keeps the generator's default footprint (400-700 ft by
+300-500 ft, larger buildings); the others are rescaled to the footprint range
+of the six shipped buildings. The pattern depends only on the position in the
+list, so a larger set always contains the smaller one unchanged. Each building is paired with one official weather strip,
 cycling over the five official stations, so the set mirrors the official
 evaluation (30-day episodes from the strip's start date).
 
 Usage (from the repository root):
-    python -m sbwm.make_validation --small 20 --large 10
+    python -m sbwm.make_validation --count 60
     python -m sbwm.eval_policy --scenarios val_data/scenarios \
         --policies dpc pid_water fixed_setpoint --weights policies/dpc_v3.pt \
         --steps 8640 --workers 10 --out results/validation_dpc_v3.json
@@ -32,15 +32,16 @@ STATIONS = ("atlanta", "denver", "fairbanks", "phoenix", "singapore")
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start-seed", type=int, default=700)
-    ap.add_argument("--small", type=int, default=20)
-    ap.add_argument("--large", type=int, default=10)
+    ap.add_argument("--count", type=int, default=60)
+    ap.add_argument("--default-every", type=int, default=3,
+                    help="every n-th building keeps the generator's default (larger) footprint")
     ap.add_argument("--root", default="val_data")
     args = ap.parse_args()
     root = Path(args.root)
     bdir, sdir = root / "buildings", root / "scenarios"
     bdir.mkdir(parents=True, exist_ok=True)
 
-    needed = args.small + args.large
+    needed = args.count
     seed, made, rows = args.start_seed, 0, []
     while made < needed and seed < args.start_seed + 10 * needed:
         yml = bdir / f"building_{seed:04d}.yaml"
@@ -48,10 +49,10 @@ def main():
             subprocess.run([sys.executable, "-m", "smart_buildings.run_floor_generator", "--seeds", str(seed),
                             "--no-pdf", "--output-dir", bdir.as_posix()], check=True, stdout=subprocess.DEVNULL)
         cfg = yaml.safe_load(yml.read_text())
-        size = "shipped" if made < args.small else "default"
+        size = "default" if (made % args.default_every) == args.default_every - 1 else "shipped"
         if size == "shipped":
-            #Lorenzo Giannuzzo: same rescaling as the training buildings, so the
-            #small half is directly comparable with the official six.
+            #Lorenzo Giannuzzo: same rescaling as the training buildings, so these
+            #are directly comparable with the official six.
             rng = np.random.default_rng(cfg["seed"])
             cfg["floor_plan"]["width"] = int(rng.uniform(310, 440))
             cfg["floor_plan"]["height"] = int(rng.uniform(185, 305))

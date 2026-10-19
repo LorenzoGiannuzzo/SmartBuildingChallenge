@@ -10,6 +10,11 @@ and gas power, time-varying cost and carbon coefficients).
 Usage (from the repository root):
     python -m sbwm.collect --scenarios wm_data/scenarios --out wm_data/episodes \
         --episodes 60 --steps 2016 --workers 2 --seed 0
+
+Monthly hybrid collection, one 30-day episode per building and station:
+    python -m sbwm.collect --scenarios month_data/scenarios --out month_data/episodes \
+        --monthly --steps 8640 --hybrid --dpc-weights policies/dpc_v4.pt --workers 10 --seed 7 \
+        --stations atlanta
 """
 
 from __future__ import annotations
@@ -26,12 +31,16 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-MODES = ("pid", "pid_noise", "random_hold", "off", "max_heat", "max_cool")
-MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05])
+MODES = ("pid", "pid_noise", "random_hold", "off", "max_heat", "max_cool", "dpc", "dpc_noise")
+MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05, 0.0, 0.0])
 #Lorenzo Giannuzzo: on-policy collection, the "pid" modes run the DPC policy
 #instead, mostly as is and partly with action noise, so that the world model
 #is corrected exactly in the states the policy visits.
-ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0])
+ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0])
+#Lorenzo Giannuzzo: hybrid collection alternates the DPC policy and
+#pid_water (both with and without noise) with random and extreme segments,
+#covering both the policy's own states and states it would not visit.
+HYBRID_WEIGHTS = np.array([0.15, 0.10, 0.10, 0.05, 0.025, 0.025, 0.35, 0.20])
 
 
 def _load_env(scenario_dir: Path, start: str):
@@ -59,10 +68,18 @@ def _load_env(scenario_dir: Path, start: str):
 class ExplorationPolicy:
     """Switches between behaviour modes on random segments of 0.5 to 6 hours."""
 
-    def __init__(self, meta, action_spec, schema, rng: np.random.Generator, dpc_weights=None):
+    def __init__(self, meta, action_spec, schema, rng: np.random.Generator, dpc_weights=None,
+                 hybrid=False):
         from smart_buildings.baselines.pid_plus import PIDWaterResetPolicy
 
-        if dpc_weights:
+        self.dpc = None
+        if hybrid:
+            from sbwm.policy import DPCPolicy
+
+            self.pid = PIDWaterResetPolicy(meta, action_spec)
+            self.dpc = DPCPolicy(meta, action_spec, weights=dpc_weights)
+            self.weights, self.noise = HYBRID_WEIGHTS, 0.25
+        elif dpc_weights:
             from sbwm.policy import DPCPolicy
 
             self.pid = DPCPolicy(meta, action_spec, weights=dpc_weights)
@@ -110,13 +127,16 @@ class ExplorationPolicy:
         #Lorenzo Giannuzzo: the PID is stepped every time to keep its internal
         #integrators consistent, even when its action is not used.
         base = self.pid.get_action(obs)
+        base_dpc = self.dpc.get_action(obs) if self.dpc is not None else None
         if self.left <= 0:
             self._new_segment()
             self.ext = self._extreme(self.mode == "max_heat") if self.mode.startswith("max") else None
         self.left -= 1
+        if self.mode in ("dpc", "dpc_noise"):
+            base = base_dpc
         c = np.asarray(base["continuous_action"], np.float32).copy()
         d = np.asarray(base["discrete_action"], np.int32).copy()
-        if self.mode == "pid_noise":
+        if self.mode in ("pid_noise", "dpc_noise"):
             c = np.clip(c + self.rng.normal(0, self.noise, c.shape), -1, 1).astype(np.float32)
             flip = self.rng.random(d.shape) < 0.05
             d = np.where(flip, 1 - d, d).astype(np.int32)
@@ -152,7 +172,8 @@ def _run_episode(job: dict) -> str:
     rng = np.random.default_rng(job["seed"])
     env, meta = _load_env(Path(job["scenario"]), job["start"])
     schema = BuildingSchema.from_meta(meta)
-    policy = ExplorationPolicy(meta, env.action_spec(), schema, rng, job.get("dpc_weights"))
+    policy = ExplorationPolicy(meta, env.action_spec(), schema, rng, job.get("dpc_weights"),
+                               job.get("hybrid", False))
 
     #Lorenzo Giannuzzo: the reward function is wrapped so that the exact
     #RewardInfo used by the environment is captured without calling the
@@ -270,6 +291,31 @@ def build_jobs(scen_root: Path, out_root: Path, n: int, steps: int, seed: int,
     return jobs
 
 
+def build_monthly_jobs(scen_root: Path, out_root: Path, steps: int, seed: int,
+                       dpc_weights=None, hybrid=False, stations=None) -> list[dict]:
+    """One episode per scenario folder (building x station), random start date."""
+    scen = sorted(p for p in scen_root.glob("*/*") if (p / "config.gin").exists())
+    if stations:
+        scen = [p for p in scen if p.name.split("_")[0] in stations]
+    days = steps * 300 / 86400.0
+    first = pd.Timestamp("2023-01-02")
+    last = pd.Timestamp("2023-12-31") - pd.Timedelta(days=days + 2)
+    jobs = []
+    for sc in scen:
+        #Lorenzo Giannuzzo: the start date and the exploration seed depend only on
+        #the seed, the building and the station, so the job list is the same on
+        #every rerun (whatever the station filter) and finished episodes are skipped.
+        bnum = int(sc.parent.name.split("_")[-1])
+        snum = sum(ord(ch) for ch in sc.name)
+        rng = np.random.default_rng([seed, bnum, snum])
+        day = first + pd.Timedelta(days=int(rng.integers(0, (last - first).days)))
+        name = f"{sc.parent.name}__{sc.name}__{day:%m%d}__m{seed}.npz"
+        jobs.append({"scenario": str(sc), "start": f"{day:%Y-%m-%d} 06:00", "steps": steps,
+                     "seed": int(rng.integers(0, 2**31 - 1)), "out": str(out_root / name),
+                     "dpc_weights": dpc_weights, "hybrid": hybrid})
+    return jobs
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenarios", required=True)
@@ -281,9 +327,20 @@ def main():
     ap.add_argument("--stations", nargs="*")
     ap.add_argument("--dpc-weights", default=None,
                     help="collect on-policy data with this DPC policy instead of pid_water")
+    ap.add_argument("--hybrid", action="store_true",
+                    help="alternate the DPC policy and pid_water with exploration segments")
+    ap.add_argument("--monthly", action="store_true",
+                    help="one episode per scenario folder (building x station) instead of --episodes random ones")
     args = ap.parse_args()
-    jobs = build_jobs(Path(args.scenarios), Path(args.out), args.episodes,
-                      args.steps, args.seed, args.stations, args.dpc_weights)
+    if args.monthly:
+        jobs = build_monthly_jobs(Path(args.scenarios), Path(args.out), args.steps, args.seed,
+                                  args.dpc_weights, args.hybrid, args.stations)
+    else:
+        jobs = build_jobs(Path(args.scenarios), Path(args.out), args.episodes,
+                          args.steps, args.seed, args.stations, args.dpc_weights)
+        for j in jobs:
+            j["hybrid"] = args.hybrid
+    print(f"{len(jobs)} episodes, {sum(Path(j['out']).exists() for j in jobs)} already done", flush=True)
     if args.workers == 1:
         for job in jobs:
             print(run_episode(job), flush=True)
