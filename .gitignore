@@ -53,3 +53,4 @@ bench_data/
 
 # Month-long training data (several GB, kept on the PC)
 month_data/
+results/benchmark.json
