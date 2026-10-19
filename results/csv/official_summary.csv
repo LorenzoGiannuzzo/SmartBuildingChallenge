@@ -1,0 +1,7 @@
+Controller,Score
+DPC Transformer (Ours),0.02726
+Bang-Bang,0.2252
+Fixed Setpoint,0.06592
+PID,0.06736
+PID With Water Reset,0.05414
+Best Baseline Per Scenario,0.04728
