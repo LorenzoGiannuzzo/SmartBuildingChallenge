@@ -1,0 +1,6 @@
+Scenario,Building,Climate,DPC Transformer,Bang-Bang,Fixed Setpoint,PID,PID With Water Reset,Best Baseline,Best Baseline Score,Improvement Versus PID With Water Reset [%],Improvement Versus Best Baseline [%],DPC Comfort Term,DPC Energy Term,DPC Carbon Term
+building_train_7/atlanta_8,Building 7,Atlanta,0.0255,0.20439,0.06356,0.07452,0.04826,PID With Water Reset,0.04826,47.2,47.2,-0.0184,-0.0023,-0.0048
+building_train_7/denver_5,Building 7,Denver,0.0169,0.24476,0.13896,0.04304,0.03609,PID With Water Reset,0.03609,53.2,53.2,-0.0112,-0.004,-0.0017
+building_train_7/fairbanks_7,Building 7,Fairbanks,0.0344,0.18642,0.07119,0.07888,0.05372,PID With Water Reset,0.05372,36.0,36.0,-0.0253,-0.0026,-0.0065
+building_train_7/phoenix_3,Building 7,Phoenix,0.0235,0.27326,0.15992,0.05063,0.04439,PID With Water Reset,0.04439,47.1,47.1,-0.0164,-0.0051,-0.0019
+building_train_7/singapore_6,Building 7,Singapore,0.0233,0.26816,0.02608,0.04413,0.03109,Fixed Setpoint,0.02608,25.1,10.7,-0.0162,-0.0052,-0.002

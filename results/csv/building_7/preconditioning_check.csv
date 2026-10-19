@@ -1,0 +1,11 @@
+Scenario,Building,Climate,Controller,Total Energy [kWh],Comfort Hours Energy [kWh],"Pre-Arrival Energy, 3 H Before Comfort Start [kWh]",Other Unoccupied Hours Energy [kWh],Non-Working Days Energy [kWh],Pre-Arrival Share [%],Non-Working Days Share [%],Median Start Lead Before Comfort Hours [h],Non-Working Days (Count),Mean Reward Per Step [-]
+building_train_7/atlanta_8,Building 7,Atlanta,DPC Transformer (Ours),3464.1,3423.0,2.8,30.3,7.9,0.1,0.2,0.0,3,-0.0223
+building_train_7/atlanta_8,Building 7,Atlanta,PID With Water Reset,3859.9,3686.4,88.6,78.3,6.7,2.3,0.2,0.0,3,-0.05267
+building_train_7/denver_5,Building 7,Denver,DPC Transformer (Ours),1557.9,1532.4,2.2,17.5,5.8,0.1,0.4,0.0,3,-0.00805
+building_train_7/denver_5,Building 7,Denver,PID With Water Reset,1027.1,1013.6,2.0,7.1,4.3,0.2,0.4,0.0,3,-0.01631
+building_train_7/fairbanks_7,Building 7,Fairbanks,DPC Transformer (Ours),3681.6,3633.3,2.8,37.1,8.5,0.1,0.2,0.0,3,-0.02363
+building_train_7/fairbanks_7,Building 7,Fairbanks,PID With Water Reset,3964.6,3636.7,95.6,27.8,204.5,2.4,5.2,0.0,3,-0.05917
+building_train_7/phoenix_3,Building 7,Phoenix,DPC Transformer (Ours),2054.3,2017.2,1.4,30.6,5.2,0.1,0.3,0.0,3,-0.01701
+building_train_7/phoenix_3,Building 7,Phoenix,PID With Water Reset,2698.3,2561.9,1.4,44.6,90.3,0.1,3.3,0.0,3,-0.026
+building_train_7/singapore_6,Building 7,Singapore,DPC Transformer (Ours),2335.6,2297.3,2.5,28.2,7.6,0.1,0.3,0.0,3,-0.01863
+building_train_7/singapore_6,Building 7,Singapore,PID With Water Reset,2894.5,2528.1,44.2,83.1,239.0,1.5,8.3,0.0,3,-0.02435

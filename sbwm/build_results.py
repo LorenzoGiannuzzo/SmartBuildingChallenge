@@ -285,29 +285,34 @@ def building_figure(table: pd.DataFrame, building: str, sub: str):
 
 def precondition_figure(profiles: dict[str, np.ndarray], shares: pd.DataFrame):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(9.6, 3.8), gridspec_kw={"width_ratios": [3, 2], "wspace": 0.3})
-    hrs = np.arange(-8, 4, 5 / 60)
+    n = len(next(iter(profiles.values())))
+    hrs = (np.arange(n) - 96) * 5 / 60  # profiles start 8 h before comfort start
     for k in ("pid_water", "dpc"):
         ax1.plot(hrs, profiles[k], color=COLORS[k], lw=2, label=CONTROLLERS[k])
     ax1.axvline(0, color=mf.INK2, lw=1)
     ax1.axvspan(-PRE_HOURS, 0, color="#f7f3e6", zorder=0, lw=0)
     ax1.set_xlabel("Time Relative To Comfort Start [h]")
     ax1.set_ylabel("Mean HVAC Power [kW]")
-    ax1.set_ylim(0, max(p.max() for p in profiles.values()) * 1.35)
+    top = max(p.max() for p in profiles.values())
+    ax1.set_ylim(0, top * 1.35)
+    ax1.set_yticks([t for t in ax1.get_yticks() if 0 <= t <= top * 1.05])
     ax1.set_title("Power Around Comfort Start, Working Days", loc="left", color=mf.INK, fontsize=10.5)
     mf._legend(ax1, 2)
     cats = ["Pre-Arrival Share [%]", "Non-Working Days Share [%]"]
     labels = [f"Pre-Arrival ({PRE_HOURS} H)", "Non-Working Days"]
     x = np.arange(len(cats))
     w = 0.34
+    plotted = []
     for i, k in enumerate(("pid_water", "dpc")):
         vals = [shares.loc[shares["Controller"] == CONTROLLERS[k], c].mean() for c in cats]
+        plotted += vals
         ax2.bar(x + (i - 0.5) * (w + 0.02), vals, width=w, color=COLORS[k], label=CONTROLLERS[k])
         for xi, v in zip(x, vals):
             ax2.text(xi + (i - 0.5) * (w + 0.02), v, f"{v:.1f}", ha="center", va="bottom", fontsize=8.5,
                      color=mf.INK)
     ax2.set_xticks(x, labels)
-    ax2.set_ylabel("Share Of Total Energy [%]")
-    ax2.set_ylim(0, max(shares[cats].max().max(), 1) * 1.5)
+    ax2.set_ylabel("Mean Share Of Total Energy [%]")
+    ax2.set_ylim(0, max(max(plotted), 1) * 1.3)
     ax2.grid(axis="x", visible=False)
     ax2.set_title("Energy Outside Occupied Hours", loc="left", color=mf.INK, fontsize=10.5)
     mf.SAVER = make_saver("")
