@@ -1,0 +1,13 @@
+{
+  "id": "lorenzogiannuzzoita/sbwm-dpc-policy",
+  "title": "sbwm-dpc-policy",
+  "code_file": "submission.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": true,
+  "enable_gpu": false,
+  "enable_internet": false,
+  "dataset_sources": ["lorenzogiannuzzoita/sbwm-policy"],
+  "competition_sources": ["neurips-2026-smart-buildings"],
+  "kernel_sources": []
+}
