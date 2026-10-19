@@ -119,11 +119,32 @@ def main():
             print(f"{name:34s} {res['policy']:10s} reward {res['mean_reward']:.4f} "
                   f"(comfort {res['comfort']:.4f} energy {res['energy']:.4f} carbon {res['carbon']:.4f}) "
                   f"{res['seconds']:.0f}s", flush=True)
+    #Lorenzo Giannuzzo: one file can hold several DPC weights, so DPC runs are
+    #labelled by their weights file and only scenarios of this call are scored.
+    wanted = {Path(s).as_posix() for s in map(str, scen)}
+    results = [r for r in results if Path(r["scenario"]).as_posix() in wanted and r["steps"] == args.steps]
+
+    def label(r):
+        return f"dpc:{Path(r['weights']).stem}" if r["policy"] == "dpc" else r["policy"]
+
+    by = {}
+    for r in results:
+        by.setdefault(label(r), {})[Path(r["scenario"]).as_posix()] = abs(r["mean_reward"])
     print("\nscore (mean |reward| over scenarios, lower is better)")
-    for p in args.policies:
-        rs = [r for r in results if r["policy"] == p]
-        if rs:
-            print(f"  {p:10s} {np.mean([abs(r['mean_reward']) for r in rs]):.4f}  over {len(rs)} scenarios")
+    for name, rs in sorted(by.items()):
+        print(f"  {name:24s} {np.mean(list(rs.values())):.4f}  over {len(rs)} scenarios")
+    #Lorenzo Giannuzzo: the paired comparison removes most of the variance due
+    #to weather and building, since every policy runs on the same scenarios.
+    ref = by.get("pid_water")
+    if ref:
+        print("\npaired improvement over pid_water (same scenarios)")
+        for name, rs in sorted(by.items()):
+            common = sorted(set(rs) & set(ref))
+            if name == "pid_water" or not common:
+                continue
+            imp = np.array([1 - rs[s] / ref[s] for s in common])
+            print(f"  {name:24s} mean {100 * imp.mean():5.1f}%  median {100 * np.median(imp):5.1f}%  "
+                  f"worst {100 * imp.min():6.1f}%  wins {int((imp > 0).sum())}/{len(common)}")
     #Lorenzo Giannuzzo: on full official episodes the shipped baseline returns
     #are directly comparable, so they are printed on the same scenarios.
     ref = Path("baseline_returns.json")
