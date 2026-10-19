@@ -46,5 +46,29 @@
   "energy": -0.004393885839285597,
   "carbon": -0.0014415659041559137,
   "seconds": 129.9393970966339
+ },
+ {
+  "scenario": "bench_data/scenarios/building_2002/denver_1",
+  "policy": "pid_water",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.02914871284601109,
+  "steps_done": 2016,
+  "comfort": -0.0212536955826051,
+  "energy": -0.006204025440902368,
+  "carbon": -0.0016909917987086088,
+  "seconds": 411.6928069591522
+ },
+ {
+  "scenario": "bench_data/scenarios/building_2002/denver_1",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/dpc_v4.pt",
+  "mean_reward": -0.02682031064639205,
+  "steps_done": 2016,
+  "comfort": -0.02004100154348028,
+  "energy": -0.004986600911699352,
+  "carbon": -0.001792708163909982,
+  "seconds": 414.81625294685364
  }
 ]
