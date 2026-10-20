@@ -45,6 +45,10 @@ def _run(job: dict) -> dict:
         from sbwm.policy import DPCPolicy
 
         pol = DPCPolicy(meta, spec, weights=job["weights"])
+    elif job["policy"] == "zonepi":
+        from sbwm.zone_pi import ZonePIPolicy
+
+        pol = ZonePIPolicy(meta, spec, params=job.get("params"))
     else:
         from smart_buildings.evaluate import POLICY_MAP
 
@@ -86,12 +90,13 @@ def main():
     ap.add_argument("--steps", type=int, default=2016)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--params", default="", help="zonepi parameters, e.g. margin=0.5,ki=0.02")
     args = ap.parse_args()
     scen = sorted(p for p in Path(args.scenarios).glob("*/*") if (p / "config.gin").exists())
     if args.filter:
         scen = [p for p in scen if any(f in str(p) for f in args.filter)]
-    jobs = [{"scenario": str(s), "policy": p, "steps": args.steps, "weights": args.weights}
-            for s in scen for p in args.policies]
+    jobs = [{"scenario": str(s), "policy": p, "steps": args.steps, "weights": args.weights,
+             "params": args.params} for s in scen for p in args.policies]
     results = []
     #Lorenzo Giannuzzo: results are saved after every run and reused on a
     #restart, so a long evaluation can be interrupted and resumed.
@@ -100,7 +105,7 @@ def main():
         #Lorenzo Giannuzzo: baselines do not depend on the policy weights, so their
         #runs are reused whatever --weights is.
         def key(r):
-            w = r["weights"] if r["policy"] == "dpc" else None
+            w = r["weights"] if r["policy"] == "dpc" else r.get("params") if r["policy"] == "zonepi" else None
             return Path(r["scenario"]).as_posix(), r["policy"], r["steps"], w
 
         done = {key(r) for r in results}
@@ -125,6 +130,8 @@ def main():
     results = [r for r in results if Path(r["scenario"]).as_posix() in wanted and r["steps"] == args.steps]
 
     def label(r):
+        if r["policy"] == "zonepi":
+            return f"zonepi:{r.get('params', '')}"
         return f"dpc:{Path(r['weights']).stem}" if r["policy"] == "dpc" else r["policy"]
 
     by = {}

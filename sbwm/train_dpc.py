@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from sbwm.policy import N_OBS_HIST, PolicyNet, build_inputs
+from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, build_inputs, hybrid_zone_actions
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
@@ -46,11 +46,20 @@ def load_models(paths):
 
 
 def policy_step(policy, ro, state, ep, t, norm, hard=True):
+    """Actions (zone, AHU, HWS) and, for the hybrid policy, the new PI integrals."""
     obs_hist = state["temp_hist"][:, 1:1 + N_OBS_HIST]
+    hybrid = getattr(policy, "hybrid", False)
+    pi_int = state.get("pi_int") if hybrid else None
+    if hybrid and pi_int is None:
+        pi_int = torch.zeros(state["zobs"].shape[:2])
     zin, ain, hin, gin = build_inputs(
         state["zobs"], state["aobs"], state["hobs"], ep.gobs[t], obs_hist, ep.static,
-        state["zact_prev"], state["aact_prev"], state["hact_prev"], ep.sched, norm.dtemp_std)
-    return policy(zin, ain, hin, gin, ro.rel, hard=hard)
+        state["zact_prev"], state["aact_prev"], state["hact_prev"], ep.sched, norm.dtemp_std,
+        pi_int)
+    zact, aact, hact = policy(zin, ain, hin, gin, ro.rel, hard=hard)
+    if hybrid:
+        zact, pi_int = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi)
+    return zact, aact, hact, pi_int
 
 
 def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
@@ -59,19 +68,40 @@ def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
 
 
 def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, anchor=None):
-    zact, aact, hact = policy_step(policy, ro, state, ep, t, norm, hard=hard)
+    zact, aact, hact, pi_int = policy_step(policy, ro, state, ep, t, norm, hard=hard)
     #Lorenzo Giannuzzo: optional trust region, the squared distance from the
     #actions an anchor policy (the one that collected the latest on-policy
     #data) would take in the same state, which keeps each update inside the
     #region where the world model has just been corrected.
     if anchor is not None:
         with torch.no_grad():
-            za, aa, ha = policy_step(anchor, ro, state, ep, t, norm, hard=hard)
+            za, aa, ha, _ = policy_step(anchor, ro, state, ep, t, norm, hard=hard)
         dev = ((zact - za) ** 2).mean((1, 2)) + ((aact - aa) ** 2).mean((1, 2)) + ((hact - ha) ** 2).mean(1)
     else:
         dev = torch.zeros(zact.shape[0])
     new_state, out, new_temp = ro.step(state, t, zact, aact, hact)
+    if pi_int is not None:
+        new_state["pi_int"] = pi_int
     return new_state, reward_from(ep, t, new_temp, out["power"], comfort_scale), dev
+
+
+def init_policy(policy, sd: dict) -> None:
+    """Load a checkpoint, also from a direct-action policy into a hybrid one.
+
+    The trunk and the AHU and hot-water heads are copied. For a hybrid target
+    the extra zone input starts with zero weights and the zone head keeps its
+    fresh initialization (tuned PI margins, unit gain, no residual), so the
+    initial policy is the source policy's plant logic on top of the zone PI.
+    """
+    own = policy.state_dict()
+    for k, v in sd.items():
+        if k not in own:
+            continue
+        if own[k].shape == v.shape:
+            own[k] = v
+        elif k == "enc_zone.0.weight" and own[k].shape[1] == v.shape[1] + 1:
+            own[k] = torch.cat([v, torch.zeros(v.shape[0], 1)], 1)
+    policy.load_state_dict(own)
 
 
 def needs_checkpoint(ep, length: int) -> bool:
@@ -97,7 +127,15 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
     if checkpoint is None:
         checkpoint = needs_checkpoint(ep, length)
     ro = Rollout(model, norm, ep)
-    state = ro.init_state(t0)
+    #Lorenzo Giannuzzo: the hybrid policy carries PI integrals, which at
+    #deployment have been accumulating for hours; a short closed-loop warm-up
+    #without gradient replaces the cold start before the scored horizon.
+    warm = PI_WARMUP if getattr(policy, "hybrid", False) else 0
+    state = ro.init_state(t0 - warm)
+    if warm:
+        with torch.no_grad():
+            for i in range(warm):
+                state, _, _ = _closed_loop_step(policy, ro, ep, norm, hard, t0 - warm + i, state)
     rewards, devs = [], []
     for i in range(length):
         t = t0 + i
@@ -136,7 +174,7 @@ def evaluate(policy, models, norm, episodes, horizon=144, starts=3, seed=0, cach
     first = cache is not None and not cache
     for ep in episodes:
         hi = ep.length - horizon - 2
-        t0 = torch.as_tensor(rng.integers(HIST + 2, hi, starts))
+        t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, hi, starts))
         for m in models:
             _, r = rollout_return(policy, m, norm, ep, t0, horizon, 1.0)
             pol.append(r.mean().item())
@@ -184,6 +222,9 @@ def main():
     ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
+    ap.add_argument("--hybrid", action="store_true",
+                    help="transformer supervises a differentiable PI per zone")
+    ap.add_argument("--pi", default="", help="PI constants, e.g. margin=0.5,ki=0.02,full=2,decay=0.9")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -195,9 +236,13 @@ def main():
     train = EpisodePool(list_files(args.train), args.pool, rng, args.refresh)
     test = load_dir(Path(args.test))
     policy_args = {"d": args.d, "layers": args.layers}
+    if args.hybrid:
+        from sbwm.zone_pi import parse_params
+
+        policy_args.update(hybrid=True, pi={k: float(v) for k, v in parse_params(args.pi).items()})
     policy = PolicyNet(**policy_args)
     if args.init:
-        policy.load_state_dict(torch.load(args.init, weights_only=False)["policy"])
+        init_policy(policy, torch.load(args.init, weights_only=False)["policy"])
     anchor = None
     if args.anchor:
         ack = torch.load(args.anchor, weights_only=False)
@@ -222,7 +267,7 @@ def main():
         train.maybe_refresh()
         ep = train.sample()
         model = models[rng.integers(len(models))]
-        t0 = torch.as_tensor(rng.integers(HIST + 2, ep.length - length - 2, args.batch))
+        t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
         ret, r, dev = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
                                      grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
                                      anchor=anchor, return_dev=True)

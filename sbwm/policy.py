@@ -17,6 +17,7 @@ from typing import Any, Mapping
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from sbwm.world_model import Block, relation_matrix
 
@@ -49,17 +50,68 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
     return torch.stack([torch.clamp(to_start, max=72.0) / 24.0, left / 12.0, weekday], -1)
 
 
+#Lorenzo Giannuzzo: default constants of the zone PI layer of the hybrid
+#policy (margin and proportional band in K, integral gain per step, integral
+#decay per step inside the band).
+PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9}
+PI_WARMUP = 12  # steps run before a DPC rollout so the integrals are not cold
+
+
+def _inv_softplus(y: float) -> float:
+    return float(math.log(math.expm1(y)))
+
+
+def hybrid_zone_actions(raw: torch.Tensor, zobs_n: torch.Tensor, pi_int: torch.Tensor, pi: dict):
+    """Zone damper and reheat commands from a differentiable PI per zone.
+
+    ``raw`` (B, V, 5) are the transformer's zone outputs: margins of the inner
+    band from the heating and from the cooling setpoint, gain, and residuals
+    on damper and reheat. ``zobs_n`` are the normalized zone observations
+    (temperature and both setpoint sensors share the 295 K / 5 K scale) and
+    ``pi_int`` (B, V) the integral states. Returns the zone actions (B, V, 2)
+    in [-1, 1] and the new integrals.
+    """
+    temp = zobs_n[..., 0] * 5.0 + 295.0
+    hsp = zobs_n[..., 1] * 5.0 + 295.0
+    csp = zobs_n[..., 2] * 5.0 + 295.0
+    width = torch.clamp(csp - hsp, min=0.5)
+    #Lorenzo Giannuzzo: the margins are in kelvin and start at the tuned PI
+    #margin; each is capped so that the inner band never inverts.
+    cap = (width - 0.5) / 2
+    c0 = _inv_softplus(pi["margin"]) if pi["margin"] > 0 else -6.0
+    m_lo = torch.minimum(F.softplus(raw[..., 0] + c0), cap)
+    m_hi = torch.minimum(F.softplus(raw[..., 1] + c0), cap)
+    lo, hi = hsp + m_lo, csp - m_hi
+    #Lorenzo Giannuzzo: positive error means too cold, as in the baselines;
+    #it is zero inside the inner band.
+    err = F.relu(lo - temp) - F.relu(temp - hi)
+    inside = (err == 0).float()
+    new_int = inside * pi_int * pi["decay"] + (1 - inside) * torch.clamp(pi_int + pi["ki"] * err, -1.0, 1.0)
+    gain = torch.exp(torch.tanh(raw[..., 2]))
+    u = torch.clamp(err * gain / pi["full"] + new_int, -1.0, 1.0)
+    damper = 2.0 * u.abs() - 1.0
+    reheat = 2.0 * F.relu(u) - 1.0
+    zact = torch.stack([damper, reheat], -1) + torch.tanh(raw[..., 3:5])
+    return torch.clamp(zact, -1.0, 1.0), new_int
+
+
 class PolicyNet(nn.Module):
-    def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128):
+    def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128,
+                 hybrid: bool = False, pi: dict | None = None):
         super().__init__()
-        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN, d), nn.GELU(), nn.Linear(d, d))
+        #Lorenzo Giannuzzo: the hybrid variant sees each zone's PI integral as
+        #one extra input and outputs the PI supervision instead of the
+        #actuator commands.
+        self.hybrid = hybrid
+        self.pi = {**PI_DEFAULTS, **(pi or {})}
+        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + int(hybrid), d), nn.GELU(), nn.Linear(d, d))
         self.enc_ahu = nn.Sequential(nn.Linear(AHU_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_hws = nn.Sequential(nn.Linear(HWS_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_glob = nn.Sequential(nn.Linear(GLOB_IN, d), nn.GELU(), nn.Linear(d, d))
         self.type_emb = nn.Parameter(torch.zeros(4, d))
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.ln = nn.LayerNorm(d)
-        self.head_zone = nn.Linear(d, 2)  # damper, reheat
+        self.head_zone = nn.Linear(d, 5 if hybrid else 2)  # PI supervision, or damper and reheat
         self.head_ahu = nn.Linear(d, 4)  # run logit, supply temp, pressure, recirculation
         self.head_hws = nn.Linear(d, 3)  # run logit, water temp, differential pressure
         for head in (self.head_zone, self.head_ahu, self.head_hws):
@@ -83,7 +135,7 @@ class PolicyNet(nn.Module):
         for blk in self.blocks:
             x = blk(x, rel)
         x = self.ln(x)
-        oz = torch.tanh(self.head_zone(x[:, :v]))
+        oz = self.head_zone(x[:, :v]) if self.hybrid else torch.tanh(self.head_zone(x[:, :v]))
         oa = self.head_ahu(x[:, v:v + k])
         oh = self.head_hws(x[:, v + k])
 
@@ -103,11 +155,14 @@ class PolicyNet(nn.Module):
 
 
 def build_inputs(zobs_n, aobs_n, hobs_n, gobs, obs_hist, static, zact_prev, aact_prev,
-                 hact_prev, sched, dtemp_std):
+                 hact_prev, sched, dtemp_std, pi_int=None):
     """Token inputs. obs_hist is (B, N_OBS_HIST, V) observed zone temperatures [K]."""
     b = zobs_n.shape[0]
     diffs = (obs_hist[:, :-1] - obs_hist[:, 1:]) / dtemp_std
-    zin = torch.cat([zobs_n, diffs.permute(0, 2, 1), static.expand(b, -1, -1), zact_prev], -1)
+    parts = [zobs_n, diffs.permute(0, 2, 1), static.expand(b, -1, -1), zact_prev]
+    if pi_int is not None:
+        parts.append(pi_int.unsqueeze(-1))
+    zin = torch.cat(parts, -1)
     ain = torch.cat([aobs_n, aact_prev], -1)
     hin = torch.cat([hobs_n, hact_prev], -1)
     gin = torch.cat([gobs, schedule_features(gobs, *sched)], -1)
@@ -147,6 +202,7 @@ class DPCPolicy:
         self.zact_prev = -torch.ones(1, self.v, 2)
         self.aact_prev = -torch.ones(1, self.s.num_ahus, 4)
         self.hact_prev = -torch.ones(1, 3)
+        self.pi_int = torch.zeros(1, self.v) if self.net.hybrid else None
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -172,11 +228,14 @@ class DPCPolicy:
             self.hist = temp_k.unsqueeze(1).repeat(1, N_OBS_HIST, 1)
         else:
             self.hist = torch.cat([temp_k.unsqueeze(1), self.hist[:, :-1]], 1)
+        zobs_n = (zobs - n.z_mean) / n.z_std
         zin, ain, hin, gin = build_inputs(
-            (zobs - n.z_mean) / n.z_std, (aobs - n.a_mean) / n.a_std, (hobs - n.h_mean) / n.h_std,
+            zobs_n, (aobs - n.a_mean) / n.a_std, (hobs - n.h_mean) / n.h_std,
             gobs, self.hist, self.static, self.zact_prev, self.aact_prev, self.hact_prev,
-            self.sched, n.dtemp_std)
+            self.sched, n.dtemp_std, self.pi_int)
         zact, aact, hact = self.net(zin, ain, hin, gin, self.rel)
+        if self.net.hybrid:
+            zact, self.pi_int = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi)
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         return to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
 

@@ -33,8 +33,10 @@ def check(model, norm, policy, ep, horizon=144, stride=30):
     pred_t, true_t, cp, ct, pp, pt = [], [], 0.0, 0.0, [], []
     for i in range(horizon):
         t = t0 + i
-        z, a, h = policy_step(policy, ro, st, ep, t, norm)
+        z, a, h, pi_int = policy_step(policy, ro, st, ep, t, norm)
         st, out, nt = ro.step(st, t, z, a, h)
+        if pi_int is not None:
+            st["pi_int"] = pi_int
         pred_t.append(nt)
         true_t.append(ep.temp[t])
         cp += comfort_term(ep, t, nt).sum().item()
