@@ -56,7 +56,7 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
 #(0 disables the derivative term and its output), and the plant floor
 #(1 enables it) with its AHU demand threshold and hot-water gain.
 PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9, "kd": 0.0,
-               "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0}
+               "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0, "hws_thr": 0.1, "cool_gain": 0.0}
 PI_WARMUP = 12  # steps run before a DPC rollout so the integrals are not cold
 
 
@@ -118,10 +118,13 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
     """Floor on the plant commands set by the zone demand (hybrid policy).
 
     An air handler whose zones need strong conditioning (mean |u| above
-    ``run_thr``) runs, the hot-water loop runs when zones call for heat, and
-    its temperature is at least the one the mean heating effort asks for.
-    The transformer can always switch on earlier or run hotter; it cannot go
-    below these floors, which no short training horizon can justify.
+    ``run_thr``) runs, the hot-water loop runs when zones call for heat (mean
+    heating effort above ``hws_thr``), and its temperature is at least the one
+    the mean heating effort asks for. Symmetrically, with ``cool_gain`` > 0
+    the supply-air temperature of each air handler is at most the one the
+    cooling effort of its zones asks for. The transformer can always switch on
+    earlier, run hotter water or colder air; it cannot go past these limits,
+    which no short training horizon can justify.
     """
     if not pi.get("plant", 0.0):
         return aact, hact
@@ -130,8 +133,15 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
     run = torch.maximum(aact[..., 0], 2.0 * (demand > pi["run_thr"]).float() - 1.0)
     heat = F.relu(u).mean(-1)  # (B,)
     water = 2.0 * torch.clamp(heat * pi["water_gain"], 0.0, 1.0) - 1.0
-    hws_run = torch.maximum(hact[:, 0], 2.0 * (heat > 0.1).float() - 1.0)
-    aact = torch.cat([run.unsqueeze(-1), aact[..., 1:]], -1)
+    hws_run = torch.maximum(hact[:, 0], 2.0 * (heat > pi["hws_thr"]).float() - 1.0)
+    supply = aact[..., 1]
+    if pi.get("cool_gain", 0.0) > 0:
+        #Lorenzo Giannuzzo: supply-air command -1 is the coldest air; the
+        #ceiling drops from +1 (no limit) as the cooling effort of the zones
+        #served by the air handler grows.
+        cool = (F.relu(-u) @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
+        supply = torch.minimum(supply, 1.0 - 2.0 * torch.clamp(cool * pi["cool_gain"], 0.0, 1.0))
+    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), aact[..., 2:]], -1)
     hact = torch.stack([hws_run, torch.maximum(hact[:, 1], water), hact[:, 2]], -1)
     return aact, hact
 
