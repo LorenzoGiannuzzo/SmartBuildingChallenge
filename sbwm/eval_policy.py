@@ -132,7 +132,12 @@ def main():
     def label(r):
         if r["policy"] == "zonepi":
             return f"zonepi:{r.get('params', '')}"
-        return f"dpc:{Path(r['weights']).stem}" if r["policy"] == "dpc" else r["policy"]
+        if r["policy"] != "dpc":
+            return r["policy"]
+        #Lorenzo Giannuzzo: checkpoints of different runs share file names, so
+        #the run folder is part of the label.
+        w = Path(r["weights"])
+        return f"dpc:{w.stem}" if w.parent.name == "policies" else f"dpc:{w.parent.name}/{w.stem}"
 
     by = {}
     for r in results:
