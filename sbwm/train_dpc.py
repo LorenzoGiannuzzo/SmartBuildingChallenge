@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, build_inputs, hybrid_zone_actions
+from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, build_inputs, hybrid_plant, hybrid_zone_actions
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
@@ -58,7 +58,10 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
         pi_int)
     zact, aact, hact = policy(zin, ain, hin, gin, ro.rel, hard=hard)
     if hybrid:
-        zact, pi_int = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi)
+        zact, pi_int, u = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi,
+                                              obs_hist[:, 0] - obs_hist[:, 1])
+        aact, hact = hybrid_plant(aact, hact, u, torch.as_tensor(ep.schema.zone_ahu),
+                                  ep.schema.num_ahus, policy.pi)
     return zact, aact, hact, pi_int
 
 
@@ -101,6 +104,10 @@ def init_policy(policy, sd: dict) -> None:
             own[k] = v
         elif k == "enc_zone.0.weight" and own[k].shape[1] == v.shape[1] + 1:
             own[k] = torch.cat([v, torch.zeros(v.shape[0], 1)], 1)
+        elif k.startswith("head_zone.") and v.shape[0] == 5 and own[k].shape[0] == 6:
+            #Lorenzo Giannuzzo: a hybrid head gains the derivative output, which
+            #keeps its fresh (near zero) initialization.
+            own[k][:5] = v
     policy.load_state_dict(own)
 
 
