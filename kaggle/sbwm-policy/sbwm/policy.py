@@ -50,10 +50,13 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
     return torch.stack([torch.clamp(to_start, max=72.0) / 24.0, left / 12.0, weekday], -1)
 
 
-#Lorenzo Giannuzzo: default constants of the zone PI layer of the hybrid
-#policy (margin and proportional band in K, integral gain per step, integral
-#decay per step inside the band).
-PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9}
+#Lorenzo Giannuzzo: default constants of the structured layer of the hybrid
+#policy: margin and proportional band in K, integral gain per step, integral
+#decay per step inside the band, derivative gain per K of change per step
+#(0 disables the derivative term and its output), and the plant floor
+#(1 enables it) with its AHU demand threshold and hot-water gain.
+PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9, "kd": 0.0,
+               "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0, "hws_thr": 0.1, "cool_gain": 0.0}
 PI_WARMUP = 12  # steps run before a DPC rollout so the integrals are not cold
 
 
@@ -61,15 +64,22 @@ def _inv_softplus(y: float) -> float:
     return float(math.log(math.expm1(y)))
 
 
-def hybrid_zone_actions(raw: torch.Tensor, zobs_n: torch.Tensor, pi_int: torch.Tensor, pi: dict):
-    """Zone damper and reheat commands from a differentiable PI per zone.
+def zone_head_size(pi: dict) -> int:
+    return 6 if pi.get("kd", 0.0) > 0 else 5
 
-    ``raw`` (B, V, 5) are the transformer's zone outputs: margins of the inner
-    band from the heating and from the cooling setpoint, gain, and residuals
-    on damper and reheat. ``zobs_n`` are the normalized zone observations
-    (temperature and both setpoint sensors share the 295 K / 5 K scale) and
-    ``pi_int`` (B, V) the integral states. Returns the zone actions (B, V, 2)
-    in [-1, 1] and the new integrals.
+
+def hybrid_zone_actions(raw: torch.Tensor, zobs_n: torch.Tensor, pi_int: torch.Tensor, pi: dict,
+                        dtemp: torch.Tensor | None = None):
+    """Zone damper and reheat commands from a differentiable PI(D) per zone.
+
+    ``raw`` (B, V, 5 or 6) are the transformer's zone outputs: margins of the
+    inner band from the heating and from the cooling setpoint, gain, residuals
+    on damper and reheat and, with a derivative term, its weight. ``zobs_n``
+    are the normalized zone observations (temperature and both setpoint
+    sensors share the 295 K / 5 K scale), ``pi_int`` (B, V) the integral
+    states and ``dtemp`` (B, V) the last change of the observed temperature
+    [K]. Returns the zone actions (B, V, 2) in [-1, 1], the new integrals and
+    the control effort u (B, V) in [-1, 1], positive when heating.
     """
     temp = zobs_n[..., 0] * 5.0 + 295.0
     hsp = zobs_n[..., 1] * 5.0 + 295.0
@@ -88,11 +98,52 @@ def hybrid_zone_actions(raw: torch.Tensor, zobs_n: torch.Tensor, pi_int: torch.T
     inside = (err == 0).float()
     new_int = inside * pi_int * pi["decay"] + (1 - inside) * torch.clamp(pi_int + pi["ki"] * err, -1.0, 1.0)
     gain = torch.exp(torch.tanh(raw[..., 2]))
-    u = torch.clamp(err * gain / pi["full"] + new_int, -1.0, 1.0)
+    effort = err * gain / pi["full"] + new_int
+    if pi.get("kd", 0.0) > 0 and dtemp is not None:
+        #Lorenzo Giannuzzo: the derivative term opposes the current change
+        #while the zone is outside the inner band (a zone already recovering
+        #receives less), with a weight the transformer sets per zone; it
+        #starts small, sigmoid(-2) of the base gain.
+        kd = pi["kd"] * torch.sigmoid(raw[..., 5] - 2.0)
+        effort = effort - (1 - inside) * kd * dtemp
+    u = torch.clamp(effort, -1.0, 1.0)
     damper = 2.0 * u.abs() - 1.0
     reheat = 2.0 * F.relu(u) - 1.0
     zact = torch.stack([damper, reheat], -1) + torch.tanh(raw[..., 3:5])
-    return torch.clamp(zact, -1.0, 1.0), new_int
+    return torch.clamp(zact, -1.0, 1.0), new_int, u
+
+
+def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_ahu: torch.Tensor,
+                 num_ahus: int, pi: dict):
+    """Floor on the plant commands set by the zone demand (hybrid policy).
+
+    An air handler whose zones need strong conditioning (mean |u| above
+    ``run_thr``) runs, the hot-water loop runs when zones call for heat (mean
+    heating effort above ``hws_thr``), and its temperature is at least the one
+    the mean heating effort asks for. Symmetrically, with ``cool_gain`` > 0
+    the supply-air temperature of each air handler is at most the one the
+    cooling effort of its zones asks for. The transformer can always switch on
+    earlier, run hotter water or colder air; it cannot go past these limits,
+    which no short training horizon can justify.
+    """
+    if not pi.get("plant", 0.0):
+        return aact, hact
+    onehot = F.one_hot(zone_ahu.long(), num_ahus).float()  # (V, K)
+    demand = (u.abs() @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
+    run = torch.maximum(aact[..., 0], 2.0 * (demand > pi["run_thr"]).float() - 1.0)
+    heat = F.relu(u).mean(-1)  # (B,)
+    water = 2.0 * torch.clamp(heat * pi["water_gain"], 0.0, 1.0) - 1.0
+    hws_run = torch.maximum(hact[:, 0], 2.0 * (heat > pi["hws_thr"]).float() - 1.0)
+    supply = aact[..., 1]
+    if pi.get("cool_gain", 0.0) > 0:
+        #Lorenzo Giannuzzo: supply-air command -1 is the coldest air; the
+        #ceiling drops from +1 (no limit) as the cooling effort of the zones
+        #served by the air handler grows.
+        cool = (F.relu(-u) @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
+        supply = torch.minimum(supply, 1.0 - 2.0 * torch.clamp(cool * pi["cool_gain"], 0.0, 1.0))
+    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), aact[..., 2:]], -1)
+    hact = torch.stack([hws_run, torch.maximum(hact[:, 1], water), hact[:, 2]], -1)
+    return aact, hact
 
 
 class PolicyNet(nn.Module):
@@ -111,7 +162,7 @@ class PolicyNet(nn.Module):
         self.type_emb = nn.Parameter(torch.zeros(4, d))
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
         self.ln = nn.LayerNorm(d)
-        self.head_zone = nn.Linear(d, 5 if hybrid else 2)  # PI supervision, or damper and reheat
+        self.head_zone = nn.Linear(d, zone_head_size(self.pi) if hybrid else 2)  # PI supervision, or damper and reheat
         self.head_ahu = nn.Linear(d, 4)  # run logit, supply temp, pressure, recirculation
         self.head_hws = nn.Linear(d, 3)  # run logit, water temp, differential pressure
         for head in (self.head_zone, self.head_ahu, self.head_hws):
@@ -203,6 +254,7 @@ class DPCPolicy:
         self.aact_prev = -torch.ones(1, self.s.num_ahus, 4)
         self.hact_prev = -torch.ones(1, 3)
         self.pi_int = torch.zeros(1, self.v) if self.net.hybrid else None
+        self.zone_ahu = torch.as_tensor(self.s.zone_ahu)
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -235,7 +287,9 @@ class DPCPolicy:
             self.sched, n.dtemp_std, self.pi_int)
         zact, aact, hact = self.net(zin, ain, hin, gin, self.rel)
         if self.net.hybrid:
-            zact, self.pi_int = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi)
+            zact, self.pi_int, u = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi,
+                                                       self.hist[:, 0] - self.hist[:, 1])
+            aact, hact = hybrid_plant(aact, hact, u, self.zone_ahu, self.s.num_ahus, self.net.pi)
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         return to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
 
