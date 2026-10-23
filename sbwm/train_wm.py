@@ -228,8 +228,12 @@ def main():
             res["step"] = step
             log.append(res)
             print(json.dumps(res), flush=True)
-            torch.save({"model": model.state_dict(), "norm": norm.state_dict(),
-                        "args": vars(args)}, out / "world_model.pt")
+            ck = {"model": model.state_dict(), "norm": norm.state_dict(), "args": vars(args), "step": step}
+            torch.save(ck, out / "world_model.pt")
+            #Lorenzo Giannuzzo: evaluations fluctuate during training, so the
+            #checkpoint with the lowest per-step reward error is also kept.
+            if res["reward_step_mae"] <= min(r["reward_step_mae"] for r in log):
+                torch.save(ck, out / "world_model_best.pt")
             (out / "eval_log.json").write_text(json.dumps(log, indent=1))
 
 
