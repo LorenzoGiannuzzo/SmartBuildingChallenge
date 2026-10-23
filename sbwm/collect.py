@@ -292,11 +292,21 @@ def build_jobs(scen_root: Path, out_root: Path, n: int, steps: int, seed: int,
 
 
 def build_monthly_jobs(scen_root: Path, out_root: Path, steps: int, seed: int,
-                       dpc_weights=None, hybrid=False, stations=None) -> list[dict]:
-    """One episode per scenario folder (building x station), random start date."""
+                       dpc_weights=None, hybrid=False, stations=None, one_station=False) -> list[dict]:
+    """One episode per scenario folder (building x station), random start date.
+
+    With ``one_station`` each building gets a single station, drawn with the
+    seed and the building number (lighter on-policy rounds).
+    """
     scen = sorted(p for p in scen_root.glob("*/*") if (p / "config.gin").exists())
     if stations:
         scen = [p for p in scen if p.name.split("_")[0] in stations]
+    if one_station:
+        by_building = {}
+        for p in scen:
+            by_building.setdefault(p.parent.name, []).append(p)
+        scen = [opts[np.random.default_rng([seed, int(b.split("_")[-1])]).integers(len(opts))]
+                for b, opts in sorted(by_building.items())]
     days = steps * 300 / 86400.0
     first = pd.Timestamp("2023-01-02")
     last = pd.Timestamp("2023-12-31") - pd.Timedelta(days=days + 2)
@@ -329,12 +339,14 @@ def main():
                     help="collect on-policy data with this DPC policy instead of pid_water")
     ap.add_argument("--hybrid", action="store_true",
                     help="alternate the DPC policy and pid_water with exploration segments")
+    ap.add_argument("--one-station", action="store_true",
+                    help="with --monthly, a single random station per building")
     ap.add_argument("--monthly", action="store_true",
                     help="one episode per scenario folder (building x station) instead of --episodes random ones")
     args = ap.parse_args()
     if args.monthly:
         jobs = build_monthly_jobs(Path(args.scenarios), Path(args.out), args.steps, args.seed,
-                                  args.dpc_weights, args.hybrid, args.stations)
+                                  args.dpc_weights, args.hybrid, args.stations, args.one_station)
     else:
         jobs = build_jobs(Path(args.scenarios), Path(args.out), args.episodes,
                           args.steps, args.seed, args.stations, args.dpc_weights)
