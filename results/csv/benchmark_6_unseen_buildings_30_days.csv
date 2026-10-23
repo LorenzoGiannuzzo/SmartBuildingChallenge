@@ -1,8 +1,8 @@
-Scenario,PID With Water Reset,Hybrid v1,Hybrid v3
-building_2000/atlanta_1,0.02470,0.00831,0.01211
-building_2003/denver_1,0.04321,0.02964,0.02686
-building_2005/fairbanks_1,0.25466,0.26075,0.22158
-building_2006/minneapolis_1,0.06650,0.01877,0.02268
-building_2009/phoenix_1,0.05870,0.03818,0.03129
-building_2012/singapore_1,0.03290,0.02089,0.02167
-Score,0.08011,0.06276,0.05603
+Scenario,PID With Water Reset,Hybrid v1,Hybrid v3,Hybrid v4
+building_2000/atlanta_1,0.02470,0.00831,0.01211,0.01792
+building_2003/denver_1,0.04321,0.02964,0.02686,0.01936
+building_2005/fairbanks_1,0.25466,0.26075,0.22158,0.21461
+building_2006/minneapolis_1,0.06650,0.01877,0.02268,0.02546
+building_2009/phoenix_1,0.05870,0.03818,0.03129,0.03432
+building_2012/singapore_1,0.03290,0.02089,0.02167,0.01328
+Score,0.08011,0.06276,0.05603,0.05416
