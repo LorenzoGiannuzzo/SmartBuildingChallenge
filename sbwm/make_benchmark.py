@@ -10,6 +10,11 @@ Episodes last seven days, so every one of them contains a weekend and a Monday
 morning start-up. The start date is written into the scenario config, which
 is where ``sbwm.eval_policy`` reads it from.
 
+A second benchmark closer to the hidden test set (buildings in the size range
+of the six shipped ones, only the five official stations) is built with
+``--default-every 0 --stations atlanta_1 denver_1 fairbanks_1 phoenix_1
+singapore_1 --per-climate 3 --start-seed 3000 --root bench2_data``.
+
 Usage (from the repository root):
     python -m sbwm.make_benchmark
     python -m sbwm.eval_policy --scenarios bench_data/scenarios --policies pid_water dpc \
@@ -39,12 +44,15 @@ def main():
     ap.add_argument("--default-every", type=int, default=3)
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--root", default="bench_data")
+    ap.add_argument("--stations", nargs="+", default=list(STATIONS),
+                    help="weather strips, one block of --per-climate buildings each")
     args = ap.parse_args()
+    stations = tuple(args.stations)
     root = Path(args.root)
     bdir, sdir = root / "buildings", root / "scenarios"
     bdir.mkdir(parents=True, exist_ok=True)
 
-    needed = args.per_climate * len(STATIONS)
+    needed = args.per_climate * len(stations)
     seed, made, rows = args.start_seed, 0, []
     while made < needed and seed < args.start_seed + 10 * needed:
         yml = bdir / f"building_{seed:04d}.yaml"
@@ -52,7 +60,7 @@ def main():
             subprocess.run([sys.executable, "-m", "smart_buildings.run_floor_generator", "--seeds", str(seed),
                             "--no-pdf", "--output-dir", bdir.as_posix()], check=True, stdout=subprocess.DEVNULL)
         cfg = yaml.safe_load(yml.read_text())
-        default = made % args.default_every == args.default_every - 1
+        default = args.default_every > 0 and made % args.default_every == args.default_every - 1
         if not default:
             rng = np.random.default_rng(cfg["seed"])
             cfg["floor_plan"]["width"] = int(rng.uniform(310, 440))
@@ -60,7 +68,7 @@ def main():
             yml.write_text(yaml.safe_dump(cfg, sort_keys=False))
         #Lorenzo Giannuzzo: consecutive buildings share a climate and split the
         #year into equal segments (January-June and July-December with two).
-        station = STATIONS[(made // args.per_climate) % len(STATIONS)]
+        station = stations[(made // args.per_climate) % len(stations)]
         half = made % args.per_climate
         target = sdir / yml.stem
         gin = target / station / "config.gin"

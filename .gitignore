@@ -51,6 +51,7 @@ zone_static.npy
 val_data/
 bench_data/
 bench30/
+bench2_data/
 
 # Month-long training data (several GB, kept on the PC)
 month_data/
