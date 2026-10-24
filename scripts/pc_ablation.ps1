@@ -42,9 +42,11 @@ $variants = [ordered]@{
 foreach ($name in $variants.Keys) {
     if (Test-Path "policies/abl_$name.pt") { Write-Host "variant $name already trained"; continue }
     $out = "wm_runs/abl_$name"
+    $extra = @($variants[$name])
+    if ($extra -notcontains "--comfort-scale") { $extra += @("--comfort-scale", "1.8") }
     & $py -m sbwm.train_dpc --wm world_models/wm_v8.pt --train @train --test month_data/episodes_test `
         --exclude-buildings month_data/buildings_list.csv --out $out --iters 400 --lengths 72 144 `
-        --eval-every 200 --threads $Threads --pool 60 --refresh 100 @($variants[$name]) @($(if ($variants[$name] -notcontains "--comfort-scale") { "--comfort-scale", "1.8" }))
+        --eval-every 200 --threads $Threads --pool 60 --refresh 100 @extra
     if ($LASTEXITCODE -ne 0) { throw "training of variant $name failed" }
     Copy-Item "$out/policy_it00400.pt" "policies/abl_$name.pt"
 }
