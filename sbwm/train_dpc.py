@@ -229,6 +229,8 @@ def main():
     ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
+    ap.add_argument("--exclude-buildings", nargs="*", default=[],
+                    help="building lists (csv with a footprint column); default-footprint buildings are skipped")
     ap.add_argument("--hybrid", action="store_true",
                     help="transformer supervises a differentiable PI per zone")
     ap.add_argument("--pi", default="", help="PI constants, e.g. margin=0.5,ki=0.02,full=2,decay=0.9")
@@ -240,7 +242,19 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     models, norm = load_models(args.wm)
-    train = EpisodePool(list_files(args.train), args.pool, rng, args.refresh)
+    files = list_files(args.train)
+    #Lorenzo Giannuzzo: start states can be restricted to buildings in the size
+    #range of the official ones, dropping the default (larger) footprints.
+    excluded = set()
+    for csv_path in args.exclude_buildings:
+        for line in Path(csv_path).read_text().splitlines()[1:]:
+            parts = line.strip().split(",")
+            if len(parts) >= 2 and parts[-1] == "default":
+                excluded.add(parts[0])
+    if excluded:
+        files = [f for f in files if f.name.split("__")[0] not in excluded]
+        print(f"excluded {len(excluded)} large buildings, {len(files)} start-state files left", flush=True)
+    train = EpisodePool(files, args.pool, rng, args.refresh)
     test = load_dir(Path(args.test))
     policy_args = {"d": args.d, "layers": args.layers}
     if args.hybrid:
