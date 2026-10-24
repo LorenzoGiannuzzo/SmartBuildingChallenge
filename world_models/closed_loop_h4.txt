@@ -1,0 +1,26 @@
+﻿previous world model (world_models/wm_v7.pt)
+building_1000__minneapolis_1__0316__m12.npz {'temp_mae_1h_6h_12h': [0.65, 1.33, 1.68], 'mean_temp_bias': 0.79, 'comfort_pred_true': [-86.0, -438.7], 'power_ratio_elec_gas': [0.81, 0.99]}
+building_1001__fairbanks_1__0709__m12.npz {'temp_mae_1h_6h_12h': [0.3, 0.56, 0.65], 'mean_temp_bias': 0.1, 'comfort_pred_true': [-38.5, -176.9], 'power_ratio_elec_gas': [1.14, 0.36]}
+building_1003__denver_1__0125__m12.npz {'temp_mae_1h_6h_12h': [0.39, 0.88, 1.23], 'mean_temp_bias': -0.38, 'comfort_pred_true': [-61.7, -244.2], 'power_ratio_elec_gas': [1.14, 1.6]}
+building_1004__phoenix_1__0801__m12.npz {'temp_mae_1h_6h_12h': [0.7, 0.82, 0.83], 'mean_temp_bias': -0.32, 'comfort_pred_true': [-199.8, -626.4], 'power_ratio_elec_gas': [0.68, 1.34]}
+building_1007__fairbanks_1__0127__m12.npz {'temp_mae_1h_6h_12h': [1.13, 2.4, 3.02], 'mean_temp_bias': 1.36, 'comfort_pred_true': [-2687.2, -3720.0], 'power_ratio_elec_gas': [2.63, 1.57]}
+building_1012__minneapolis_1__0528__m12.npz {'temp_mae_1h_6h_12h': [0.46, 0.68, 0.84], 'mean_temp_bias': -0.21, 'comfort_pred_true': [-66.1, -280.7], 'power_ratio_elec_gas': [0.64, 0.48]}
+building_1014__singapore_1__0526__m12.npz {'temp_mae_1h_6h_12h': [0.55, 0.73, 0.79], 'mean_temp_bias': -0.29, 'comfort_pred_true': [-16.6, -368.7], 'power_ratio_elec_gas': [0.6, 0.42]}
+building_1017__denver_1__0127__m12.npz {'temp_mae_1h_6h_12h': [0.36, 0.78, 1.05], 'mean_temp_bias': -0.31, 'comfort_pred_true': [-149.8, -201.9], 'power_ratio_elec_gas': [1.63, 2.21]}
+building_1018__phoenix_1__1129__m12.npz {'temp_mae_1h_6h_12h': [0.21, 0.51, 0.7], 'mean_temp_bias': 0.1, 'comfort_pred_true': [-47.2, -204.1], 'power_ratio_elec_gas': [0.9, 0.47]}
+building_1020__singapore_1__0818__m12.npz {'temp_mae_1h_6h_12h': [0.46, 0.69, 0.79], 'mean_temp_bias': -0.29, 'comfort_pred_true': [-56.7, -346.0], 'power_ratio_elec_gas': [0.53, 0.68]}
+building_1025__atlanta_1__0419__m12.npz {'temp_mae_1h_6h_12h': [0.36, 0.56, 0.71], 'mean_temp_bias': -0.15, 'comfort_pred_true': [-91.6, -273.6], 'power_ratio_elec_gas': [0.61, 0.76]}
+building_1057__atlanta_1__0803__m12.npz {'temp_mae_1h_6h_12h': [0.4, 0.52, 0.63], 'mean_temp_bias': -0.11, 'comfort_pred_true': [-10.2, -237.1], 'power_ratio_elec_gas': [0.73, 0.68]}
+world model v8
+building_1000__minneapolis_1__0316__m12.npz {'temp_mae_1h_6h_12h': [0.67, 1.37, 1.81], 'mean_temp_bias': 0.75, 'comfort_pred_true': [-267.1, -438.7], 'power_ratio_elec_gas': [1.03, 1.38]}
+building_1001__fairbanks_1__0709__m12.npz {'temp_mae_1h_6h_12h': [0.31, 0.57, 0.7], 'mean_temp_bias': 0.12, 'comfort_pred_true': [-80.9, -176.9], 'power_ratio_elec_gas': [1.29, 0.46]}
+building_1003__denver_1__0125__m12.npz {'temp_mae_1h_6h_12h': [0.36, 0.77, 1.07], 'mean_temp_bias': 0.13, 'comfort_pred_true': [-191.7, -244.2], 'power_ratio_elec_gas': [1.75, 2.18]}
+building_1004__phoenix_1__0801__m12.npz {'temp_mae_1h_6h_12h': [0.71, 0.89, 0.88], 'mean_temp_bias': -0.38, 'comfort_pred_true': [-164.1, -626.4], 'power_ratio_elec_gas': [0.66, 1.27]}
+building_1007__fairbanks_1__0127__m12.npz {'temp_mae_1h_6h_12h': [1.08, 2.34, 3.0], 'mean_temp_bias': 1.36, 'comfort_pred_true': [-2525.6, -3720.0], 'power_ratio_elec_gas': [2.48, 1.41]}
+building_1012__minneapolis_1__0528__m12.npz {'temp_mae_1h_6h_12h': [0.48, 0.71, 0.85], 'mean_temp_bias': -0.06, 'comfort_pred_true': [-77.1, -280.7], 'power_ratio_elec_gas': [0.76, 0.61]}
+building_1014__singapore_1__0526__m12.npz {'temp_mae_1h_6h_12h': [0.59, 0.74, 0.74], 'mean_temp_bias': -0.15, 'comfort_pred_true': [-26.6, -368.7], 'power_ratio_elec_gas': [0.69, 0.42]}
+building_1017__denver_1__0127__m12.npz {'temp_mae_1h_6h_12h': [0.36, 0.83, 1.17], 'mean_temp_bias': 0.13, 'comfort_pred_true': [-380.6, -201.9], 'power_ratio_elec_gas': [2.44, 2.85]}
+building_1018__phoenix_1__1129__m12.npz {'temp_mae_1h_6h_12h': [0.21, 0.56, 0.8], 'mean_temp_bias': 0.39, 'comfort_pred_true': [-138.0, -204.1], 'power_ratio_elec_gas': [1.21, 0.77]}
+building_1020__singapore_1__0818__m12.npz {'temp_mae_1h_6h_12h': [0.46, 0.63, 0.66], 'mean_temp_bias': -0.2, 'comfort_pred_true': [-58.9, -346.0], 'power_ratio_elec_gas': [0.58, 0.65]}
+building_1025__atlanta_1__0419__m12.npz {'temp_mae_1h_6h_12h': [0.36, 0.59, 0.69], 'mean_temp_bias': 0.07, 'comfort_pred_true': [-174.7, -273.6], 'power_ratio_elec_gas': [0.86, 0.87]}
+building_1057__atlanta_1__0803__m12.npz {'temp_mae_1h_6h_12h': [0.42, 0.58, 0.67], 'mean_temp_bias': -0.03, 'comfort_pred_true': [-21.5, -237.1], 'power_ratio_elec_gas': [0.81, 0.69]}
