@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, build_inputs, hybrid_plant, hybrid_zone_actions
+from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, band_excess, build_inputs, hybrid_plant, hybrid_zone_actions
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
@@ -61,7 +61,7 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
         zact, pi_int, u = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi,
                                               obs_hist[:, 0] - obs_hist[:, 1])
         aact, hact = hybrid_plant(aact, hact, u, torch.as_tensor(ep.schema.zone_ahu),
-                                  ep.schema.num_ahus, policy.pi)
+                                  ep.schema.num_ahus, policy.pi, band_excess(state["zobs"]))
     return zact, aact, hact, pi_int
 
 
