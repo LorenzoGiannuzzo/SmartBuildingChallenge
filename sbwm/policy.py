@@ -57,7 +57,7 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
 #(1 enables it) with its AHU demand threshold and hot-water gain.
 PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9, "kd": 0.0,
                "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0, "hws_thr": 0.1, "cool_gain": 0.0,
-               "floor_k": 0.0}
+               "floor_k": 0.0, "press_gain": 0.0}
 PI_WARMUP = 12  # steps run before a DPC rollout so the integrals are not cold
 
 
@@ -156,7 +156,13 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
         #served by the air handler grows.
         cool = (F.relu(-u) @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
         supply = torch.minimum(supply, 1.0 - 2.0 * torch.clamp(cool * pi["cool_gain"], 0.0, 1.0))
-    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), aact[..., 2:]], -1)
+    pressure = aact[..., 2]
+    if pi.get("press_gain", 0.0) > 0:
+        #Lorenzo Giannuzzo: the static pressure of each air handler is at least
+        #what the mean zone effort asks for, so that zones whose dampers open
+        #actually receive air instead of being starved by a low fan setpoint.
+        pressure = torch.maximum(pressure, 2.0 * torch.clamp(demand * pi["press_gain"], 0.0, 1.0) - 1.0)
+    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), pressure.unsqueeze(-1), aact[..., 3:]], -1)
     hact = torch.stack([hws_run, torch.maximum(hact[:, 1], water), hact[:, 2]], -1)
     return aact, hact
 
