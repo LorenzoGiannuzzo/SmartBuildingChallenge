@@ -12,6 +12,7 @@
 #        C  B + derivative term            (from hybrid_v1)
 #        D  C + winter plant floor         (from hybrid_v1)
 #        E  D + summer supply-air ceiling  (from hybrid_v1)
+#      plus B10 and E10, the same as B and E without the comfort correction (1.0);
 #   2. bench2 (15 unseen buildings, official size range and stations) is built;
 #   3. pid_water, hybrid_v1, hybrid_v4 and A-E are evaluated over 7 days on the
 #      30 official scenarios and on bench2;
@@ -34,14 +35,16 @@ $variants = [ordered]@{
     "B" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", $pi0);
     "C" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", "$pi0,kd=2");
     "D" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", "$pi0,kd=2,plant=1,run_thr=0.7,hws_thr=0.25,water_gain=2,cool_gain=0");
-    "E" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", "$pi0,kd=2,plant=1,run_thr=0.7,hws_thr=0.25,water_gain=2,cool_gain=2")
+    "E" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", "$pi0,kd=2,plant=1,run_thr=0.7,hws_thr=0.25,water_gain=2,cool_gain=2");
+    "B10" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", $pi0, "--comfort-scale", "1.0");
+    "E10" = @("--init", "policies/hybrid_v1.pt", "--hybrid", "--pi", "$pi0,kd=2,plant=1,run_thr=0.7,hws_thr=0.25,water_gain=2,cool_gain=2", "--comfort-scale", "1.0")
 }
 foreach ($name in $variants.Keys) {
     if (Test-Path "policies/abl_$name.pt") { Write-Host "variant $name already trained"; continue }
     $out = "wm_runs/abl_$name"
     & $py -m sbwm.train_dpc --wm world_models/wm_v8.pt --train @train --test month_data/episodes_test `
         --exclude-buildings month_data/buildings_list.csv --out $out --iters 400 --lengths 72 144 `
-        --eval-every 200 --threads $Threads --comfort-scale 1.8 --pool 60 --refresh 100 @($variants[$name])
+        --eval-every 200 --threads $Threads --pool 60 --refresh 100 @($variants[$name]) @($(if ($variants[$name] -notcontains "--comfort-scale") { "--comfort-scale", "1.8" }))
     if ($LASTEXITCODE -ne 0) { throw "training of variant $name failed" }
     Copy-Item "$out/policy_it00400.pt" "policies/abl_$name.pt"
 }
