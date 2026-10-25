@@ -56,7 +56,8 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
 #(0 disables the derivative term and its output), and the plant floor
 #(1 enables it) with its AHU demand threshold and hot-water gain.
 PI_DEFAULTS = {"margin": 0.5, "full": 2.0, "ki": 0.02, "decay": 0.9, "kd": 0.0,
-               "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0, "hws_thr": 0.1, "cool_gain": 0.0}
+               "plant": 0.0, "run_thr": 0.5, "water_gain": 2.0, "hws_thr": 0.1, "cool_gain": 0.0,
+               "floor_k": 0.0, "press_gain": 0.0}
 PI_WARMUP = 12  # steps run before a DPC rollout so the integrals are not cold
 
 
@@ -113,8 +114,16 @@ def hybrid_zone_actions(raw: torch.Tensor, zobs_n: torch.Tensor, pi_int: torch.T
     return torch.clamp(zact, -1.0, 1.0), new_int, u
 
 
+def band_excess(zobs_n: torch.Tensor) -> torch.Tensor:
+    """Kelvin outside the zone's own setpoint band (positive below heating)."""
+    temp = zobs_n[..., 0] * 5.0 + 295.0
+    hsp = zobs_n[..., 1] * 5.0 + 295.0
+    csp = zobs_n[..., 2] * 5.0 + 295.0
+    return F.relu(hsp - temp) - F.relu(temp - csp)
+
+
 def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_ahu: torch.Tensor,
-                 num_ahus: int, pi: dict):
+                 num_ahus: int, pi: dict, excess: torch.Tensor | None = None):
     """Floor on the plant commands set by the zone demand (hybrid policy).
 
     An air handler whose zones need strong conditioning (mean |u| above
@@ -125,9 +134,15 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
     cooling effort of its zones asks for. The transformer can always switch on
     earlier, run hotter water or colder air; it cannot go past these limits,
     which no short training horizon can justify.
+
+    With ``floor_k`` > 0 the demand is measured in kelvin outside the zone's
+    own setpoint band (``excess``, scaled by ``floor_k``) instead of by the PI
+    effort, so mild weather with saturated integrals does not trigger it.
     """
     if not pi.get("plant", 0.0):
         return aact, hact
+    if pi.get("floor_k", 0.0) > 0 and excess is not None:
+        u = torch.clamp(excess / pi["floor_k"], -1.0, 1.0)
     onehot = F.one_hot(zone_ahu.long(), num_ahus).float()  # (V, K)
     demand = (u.abs() @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
     run = torch.maximum(aact[..., 0], 2.0 * (demand > pi["run_thr"]).float() - 1.0)
@@ -141,7 +156,13 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
         #served by the air handler grows.
         cool = (F.relu(-u) @ onehot) / onehot.sum(0).clamp(min=1)  # (B, K)
         supply = torch.minimum(supply, 1.0 - 2.0 * torch.clamp(cool * pi["cool_gain"], 0.0, 1.0))
-    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), aact[..., 2:]], -1)
+    pressure = aact[..., 2]
+    if pi.get("press_gain", 0.0) > 0:
+        #Lorenzo Giannuzzo: the static pressure of each air handler is at least
+        #what the mean zone effort asks for, so that zones whose dampers open
+        #actually receive air instead of being starved by a low fan setpoint.
+        pressure = torch.maximum(pressure, 2.0 * torch.clamp(demand * pi["press_gain"], 0.0, 1.0) - 1.0)
+    aact = torch.cat([run.unsqueeze(-1), supply.unsqueeze(-1), pressure.unsqueeze(-1), aact[..., 3:]], -1)
     hact = torch.stack([hws_run, torch.maximum(hact[:, 1], water), hact[:, 2]], -1)
     return aact, hact
 
@@ -289,7 +310,8 @@ class DPCPolicy:
         if self.net.hybrid:
             zact, self.pi_int, u = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi,
                                                        self.hist[:, 0] - self.hist[:, 1])
-            aact, hact = hybrid_plant(aact, hact, u, self.zone_ahu, self.s.num_ahus, self.net.pi)
+            aact, hact = hybrid_plant(aact, hact, u, self.zone_ahu, self.s.num_ahus, self.net.pi,
+                                      band_excess(zobs_n))
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         return to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
 
