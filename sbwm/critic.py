@@ -179,4 +179,4 @@ def critic_loss(critic, target, states, ts, r, ep, norm, rel, gamma, lam, sample
     idx = sorted(rng.choice(h, n, replace=False).tolist())
     y = critic_y(critic, [det[i] for i in idx], [ts[i] for i in idx], ep, norm, rel)
     tgt = to_y(ret[idx], gamma).unsqueeze(0).expand_as(y)
-    return F.smooth_l1_loss(y, tgt), ret
+    return F.mse_loss(y, tgt), ret
