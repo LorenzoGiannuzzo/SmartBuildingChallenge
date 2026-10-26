@@ -286,7 +286,8 @@ def main():
     ap.add_argument("--critic-updates", type=int, default=2, help="critic steps per critic rollout")
     ap.add_argument("--critic-warmup", type=int, default=200,
                     help="critic-only iterations before the policy starts to move")
-    ap.add_argument("--critic-lambda", type=float, default=0.95, help="lambda of the critic targets")
+    ap.add_argument("--critic-lambda", type=float, default=1.0,
+                    help="lambda of the critic targets (the world model is deterministic, so 1 adds no variance)")
     ap.add_argument("--actor-lambda", type=float, default=0.95, help="lambda of the policy objective")
     ap.add_argument("--critic-tau", type=float, default=0.05, help="target-critic update rate")
     ap.add_argument("--critic-sample", type=float, default=0.25,
