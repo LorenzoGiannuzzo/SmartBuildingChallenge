@@ -15,13 +15,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
+from torch.utils.checkpoint import checkpoint as ckpt
 
+from sbwm.critic import VALUE_SCALE, CriticNet, critic_loss, critic_y, lambda_returns, to_sum
 from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, band_excess, build_inputs, hybrid_plant, hybrid_zone_actions
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
@@ -123,11 +126,13 @@ def needs_checkpoint(ep, length: int) -> bool:
 
 
 def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0,
-                   checkpoint=None, comfort_scale=1.0, anchor=None, return_dev=False):
+                   checkpoint=None, comfort_scale=1.0, anchor=None, return_dev=False, keep_states=False):
     """Discounted predicted reward (B,) and per-step rewards (L, B).
 
     With ``return_dev`` the mean squared action distance from ``anchor`` over
-    the rollout is returned as a third value.
+    the rollout is returned as a third value. With ``keep_states`` the states
+    s_0..s_L, their decision indices and the rollout are appended (for the
+    critic).
     """
     from torch.utils.checkpoint import checkpoint as ckpt
 
@@ -144,6 +149,7 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
             for i in range(warm):
                 state, _, _ = _closed_loop_step(policy, ro, ep, norm, hard, t0 - warm + i, state)
     rewards, devs = [], []
+    states, ts = [state], [t0]
     for i in range(length):
         t = t0 + i
         #Lorenzo Giannuzzo: each closed-loop step is recomputed during the
@@ -162,11 +168,17 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
         #so credit from h steps later is weighted by grad_decay**h.
         if grad_decay < 1.0:
             state = {k: _damp(v, grad_decay) for k, v in state.items()}
+        if keep_states:
+            states.append(state)
+            ts.append(t + 1)
     r = torch.stack(rewards)
     disc = gamma ** torch.arange(length, dtype=r.dtype).unsqueeze(1)
+    out = ((disc * r).sum(0), r)
     if return_dev:
-        return (disc * r).sum(0), r, torch.stack(devs).mean()
-    return (disc * r).sum(0), r
+        out += (torch.stack(devs).mean(),)
+    if keep_states:
+        out += (states, ts, ro)
+    return out
 
 
 @torch.no_grad()
@@ -204,6 +216,34 @@ def evaluate(policy, models, norm, episodes, horizon=144, starts=3, seed=0, cach
     return res
 
 
+@torch.no_grad()
+def critic_check(policy, critic, model, norm, episodes, gamma, comfort_scale=1.0, horizon=288, starts=3, seed=1):
+    """Calibration of the critic against longer imagined rollouts.
+
+    From test states, the value predicted at the start is compared with the
+    discounted reward of a ``horizon``-step rollout of the policy plus the
+    critic's value at its end; both are reported per step. A calibrated
+    critic has small bias and high correlation.
+    """
+    rng = np.random.default_rng(seed)
+    pred, mc = [], []
+    for ep in episodes:
+        hi = ep.length - horizon - 2
+        if hi <= HIST + 2 + PI_WARMUP:
+            continue
+        t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, hi, starts))
+        _, r, states, ts, ro = rollout_return(policy, model, norm, ep, t0, horizon, gamma,
+                                              comfort_scale=comfort_scale, keep_states=True)
+        v = to_sum(critic_y(critic, [states[0], states[-1]], [ts[0], ts[-1]], ep, norm, ro.rel).mean(0), gamma)
+        disc = gamma ** torch.arange(horizon, dtype=r.dtype).unsqueeze(1)
+        pred.append((1 - gamma) * v[0])
+        mc.append((1 - gamma) * ((disc * r).sum(0) + gamma ** horizon * v[1]))
+    pred, mc = torch.cat(pred), torch.cat(mc)
+    corr = torch.corrcoef(torch.stack([pred, mc]))[0, 1].item() if len(pred) > 2 else float("nan")
+    return {"critic_bias": round((pred - mc).mean().item(), 5), "critic_corr": round(corr, 3),
+            "critic_mc_mean": round(mc.mean().item(), 5)}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--wm", nargs="+", required=True)
@@ -234,6 +274,23 @@ def main():
     ap.add_argument("--hybrid", action="store_true",
                     help="transformer supervises a differentiable PI per zone")
     ap.add_argument("--pi", default="", help="PI constants, e.g. margin=0.5,ki=0.02,full=2,decay=0.9")
+    ap.add_argument("--critic", action="store_true",
+                    help="bootstrap the rollouts with a learned value function (lambda-returns)")
+    ap.add_argument("--critic-d", type=int, default=64)
+    ap.add_argument("--critic-layers", type=int, default=3)
+    ap.add_argument("--critic-ens", type=int, default=2, help="independent value networks in the ensemble")
+    ap.add_argument("--critic-lr", type=float, default=3e-4)
+    ap.add_argument("--critic-warmup", type=int, default=200,
+                    help="critic-only iterations before the policy starts to move")
+    ap.add_argument("--critic-lambda", type=float, default=0.95, help="lambda of the critic targets")
+    ap.add_argument("--actor-lambda", type=float, default=0.95, help="lambda of the policy objective")
+    ap.add_argument("--critic-tau", type=float, default=0.02, help="target-critic update rate")
+    ap.add_argument("--critic-sample", type=float, default=0.25,
+                    help="share of rollout steps used as critic regression samples")
+    ap.add_argument("--critic-pessimism", type=int, default=1,
+                    help="1: the policy sees the ensemble minimum, 0: the ensemble mean")
+    ap.add_argument("--critic-init", default=None, help="checkpoint whose critic is loaded")
+    ap.add_argument("--critic-chunk", type=int, default=12, help="states per checkpointed critic call")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -276,10 +333,63 @@ def main():
           f"| models {len(models)}", flush=True)
     opt = torch.optim.AdamW(policy.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.iters)
+    critic = target = copt = None
+    critic_args = {"d": args.critic_d, "layers": args.critic_layers, "ens": args.critic_ens}
+    if args.critic:
+        critic = CriticNet(**critic_args)
+        if args.critic_init:
+            cck = torch.load(args.critic_init, weights_only=False)
+            if "critic" in cck:
+                critic.load_state_dict(cck["critic"])
+                print(f"critic loaded from {args.critic_init}", flush=True)
+        target = copy.deepcopy(critic)
+        for prm in target.parameters():
+            prm.requires_grad_(False)
+        copt = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, weight_decay=1e-4)
+        print(f"critic params {sum(p.numel() for p in critic.parameters())}", flush=True)
+
+    def critic_update(states, ts, r, ep, rel):
+        closs, ret = critic_loss(critic, target, states, ts, r, ep, norm, rel, args.gamma,
+                                 args.critic_lambda, args.critic_sample, rng)
+        copt.zero_grad()
+        closs.backward()
+        torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
+        copt.step()
+        with torch.no_grad():
+            for pt, pc in zip(target.parameters(), critic.parameters()):
+                pt.lerp_(pc, args.critic_tau)
+        return closs.item(), ret
+
+    #Lorenzo Giannuzzo: the critic first learns the value of the initial policy
+    #on its own imagined rollouts, so the policy is never pushed by an
+    #untrained value function.
+    t_start = time.time()
+    if critic is not None and not args.critic_init:
+        for it in range(1, args.critic_warmup + 1):
+            #Lorenzo Giannuzzo: the longest horizon of the curriculum, so that
+            #each target reaches further before it is bootstrapped.
+            length = args.lengths[-1]
+            train.maybe_refresh()
+            ep = train.sample()
+            model = models[rng.integers(len(models))]
+            t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
+            with torch.no_grad():
+                _, r, states, ts, ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
+                                                      comfort_scale=args.comfort_scale, keep_states=True)
+                if it == 1:
+                    #Lorenzo Giannuzzo: the value starts at the mean reward of the
+                    #first rollouts, so bootstrapping does not have to climb from
+                    #an arbitrary level over hundreds of steps.
+                    for net in (critic, target):
+                        for m in net.members:
+                            m.head_glob.bias.fill_(r.mean().item() / VALUE_SCALE)
+            closs, ret = critic_update(states, ts, r, ep, ro.rel)
+            if it % 25 == 0:
+                print(f"critic warm-up {it} loss {closs:.4f} return/step {(1 - args.gamma) * ret[0].mean().item():.4f} "
+                      f"reward {r.mean().item():.4f} | {time.time() - t_start:.0f}s", flush=True)
     log = []
     best = -1e9
     eval_cache = {}
-    t_start = time.time()
     for it in range(1, args.iters + 1):
         #Lorenzo Giannuzzo: the horizon grows along the curriculum (by default
         #2, 4 and 6 hours), long enough to see the effect of preconditioning.
@@ -289,25 +399,48 @@ def main():
         ep = train.sample()
         model = models[rng.integers(len(models))]
         t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
-        ret, r, dev = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
-                                     grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
-                                     anchor=anchor, return_dev=True)
-        loss = -ret.mean() / length + args.anchor_weight * dev
+        res_ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
+                                grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
+                                anchor=anchor, return_dev=True, keep_states=critic is not None)
+        ret, r, dev = res_ro[:3]
+        if critic is None:
+            loss = -ret.mean() / length + args.anchor_weight * dev
+        else:
+            #Lorenzo Giannuzzo: the policy maximizes the lambda-returns of the
+            #rollout, each bootstrapped with the critic's value of the state
+            #reached; the value is differentiable with respect to that state, so
+            #its gradient flows back through the world model to the actions.
+            states, ts, ro = res_ro[3:]
+            ys = [ckpt(critic_y, critic, states[c:c + args.critic_chunk], ts[c:c + args.critic_chunk],
+                       ep, norm, ro.rel, use_reentrant=False)
+                  for c in range(1, len(states), args.critic_chunk)]
+            y = torch.cat(ys, 1)
+            y = y.min(0).values if args.critic_pessimism else y.mean(0)
+            lam_ret = lambda_returns(r, to_sum(y, args.gamma), args.gamma, args.actor_lambda)
+            loss = -(1 - args.gamma) * lam_ret.mean() + args.anchor_weight * dev
         opt.zero_grad()
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
         opt.step()
         sched.step()
+        closs = None
+        if critic is not None:
+            closs, _ = critic_update(states, ts, r, ep, ro.rel)
         if it % 25 == 0:
-            print(f"it {it} L={length} step_reward {r.mean().item():.4f} dev {dev.item():.4f} grad {gnorm:.3f} "
-                  f"| {time.time() - t_start:.0f}s", flush=True)
+            extra = "" if closs is None else f" critic_loss {closs:.4f} value/step {-loss.item():.4f}"
+            print(f"it {it} L={length} step_reward {r.mean().item():.4f} dev {dev.item():.4f} grad {gnorm:.3f}"
+                  f"{extra} | {time.time() - t_start:.0f}s", flush=True)
         if it % args.eval_every == 0 or it == args.iters:
             res = evaluate(policy, models, norm, test, cache=eval_cache)
+            if critic is not None:
+                res.update(critic_check(policy, critic, models[0], norm, test, args.gamma, args.comfort_scale))
             res["it"] = it
             log.append(res)
             print(json.dumps(res), flush=True)
             ck = {"policy": policy.state_dict(), "policy_args": policy_args,
                   "norm": norm.state_dict(), "wm": args.wm, "it": it, "eval": res}
+            if critic is not None:
+                ck.update(critic=critic.state_dict(), critic_args=critic_args)
             torch.save(ck, out / "policy_last.pt")
             torch.save(ck, out / f"policy_it{it:05d}.pt")
             if res["policy_pred"] > best:
