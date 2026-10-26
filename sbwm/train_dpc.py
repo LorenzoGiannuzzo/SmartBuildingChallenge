@@ -279,12 +279,16 @@ def main():
     ap.add_argument("--critic-d", type=int, default=64)
     ap.add_argument("--critic-layers", type=int, default=3)
     ap.add_argument("--critic-ens", type=int, default=2, help="independent value networks in the ensemble")
-    ap.add_argument("--critic-lr", type=float, default=3e-4)
+    ap.add_argument("--critic-lr", type=float, default=1e-3)
+    ap.add_argument("--critic-horizon", type=int, default=576,
+                    help="steps of the gradient-free rollouts the critic learns from (576: 48 h)")
+    ap.add_argument("--critic-batch", type=int, default=8, help="start states per critic rollout")
+    ap.add_argument("--critic-updates", type=int, default=2, help="critic steps per critic rollout")
     ap.add_argument("--critic-warmup", type=int, default=200,
                     help="critic-only iterations before the policy starts to move")
     ap.add_argument("--critic-lambda", type=float, default=0.95, help="lambda of the critic targets")
     ap.add_argument("--actor-lambda", type=float, default=0.95, help="lambda of the policy objective")
-    ap.add_argument("--critic-tau", type=float, default=0.02, help="target-critic update rate")
+    ap.add_argument("--critic-tau", type=float, default=0.05, help="target-critic update rate")
     ap.add_argument("--critic-sample", type=float, default=0.25,
                     help="share of rollout steps used as critic regression samples")
     ap.add_argument("--critic-pessimism", type=int, default=1,
@@ -348,42 +352,45 @@ def main():
         copt = torch.optim.AdamW(critic.parameters(), lr=args.critic_lr, weight_decay=1e-4)
         print(f"critic params {sum(p.numel() for p in critic.parameters())}", flush=True)
 
-    def critic_update(states, ts, r, ep, rel):
-        closs, ret = critic_loss(critic, target, states, ts, r, ep, norm, rel, args.gamma,
-                                 args.critic_lambda, args.critic_sample, rng)
-        copt.zero_grad()
-        closs.backward()
-        torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
-        copt.step()
+    #Lorenzo Giannuzzo: with a discount of 0.997 the value looks about 28 h
+    #ahead; on the 6-12 h rollouts of the policy update its targets would be
+    #mostly its own bootstrap and the value would spread across states very
+    #slowly. Rollouts of 48 h without gradient make most of each target real
+    #(predicted) reward, at a fraction of the cost of the policy update.
+    def critic_round(ep, model, first=False):
+        """One gradient-free long rollout of the current policy and critic steps on it."""
+        length = args.critic_horizon
+        t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, max(HIST + 3 + PI_WARMUP, ep.length - length - 2),
+                                          args.critic_batch))
+        length = min(length, ep.length - 2 - int(t0.max()))
+        with torch.no_grad():
+            _, r, states, ts, ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
+                                                  comfort_scale=args.comfort_scale, keep_states=True)
+            if first:
+                #Lorenzo Giannuzzo: the value starts at the mean reward of the
+                #first rollouts instead of an arbitrary level.
+                for net in (critic, target):
+                    for m in net.members:
+                        m.head_glob.bias.fill_(r.mean().item() / VALUE_SCALE)
+        for _ in range(args.critic_updates):
+            closs, ret = critic_loss(critic, target, states, ts, r, ep, norm, ro.rel, args.gamma,
+                                     args.critic_lambda, args.critic_sample, rng)
+            copt.zero_grad()
+            closs.backward()
+            torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
+            copt.step()
         with torch.no_grad():
             for pt, pc in zip(target.parameters(), critic.parameters()):
                 pt.lerp_(pc, args.critic_tau)
-        return closs.item(), ret
+        return closs.item(), ret, r
 
-    #Lorenzo Giannuzzo: the critic first learns the value of the initial policy
-    #on its own imagined rollouts, so the policy is never pushed by an
-    #untrained value function.
+    #Lorenzo Giannuzzo: the critic first learns the value of the initial policy,
+    #so the policy is never pushed by an untrained value function.
     t_start = time.time()
     if critic is not None and not args.critic_init:
         for it in range(1, args.critic_warmup + 1):
-            #Lorenzo Giannuzzo: the longest horizon of the curriculum, so that
-            #each target reaches further before it is bootstrapped.
-            length = args.lengths[-1]
             train.maybe_refresh()
-            ep = train.sample()
-            model = models[rng.integers(len(models))]
-            t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
-            with torch.no_grad():
-                _, r, states, ts, ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
-                                                      comfort_scale=args.comfort_scale, keep_states=True)
-                if it == 1:
-                    #Lorenzo Giannuzzo: the value starts at the mean reward of the
-                    #first rollouts, so bootstrapping does not have to climb from
-                    #an arbitrary level over hundreds of steps.
-                    for net in (critic, target):
-                        for m in net.members:
-                            m.head_glob.bias.fill_(r.mean().item() / VALUE_SCALE)
-            closs, ret = critic_update(states, ts, r, ep, ro.rel)
+            closs, ret, r = critic_round(train.sample(), models[rng.integers(len(models))], first=it == 1)
             if it % 25 == 0:
                 print(f"critic warm-up {it} loss {closs:.4f} return/step {(1 - args.gamma) * ret[0].mean().item():.4f} "
                       f"reward {r.mean().item():.4f} | {time.time() - t_start:.0f}s", flush=True)
@@ -425,7 +432,7 @@ def main():
         sched.step()
         closs = None
         if critic is not None:
-            closs, _ = critic_update(states, ts, r, ep, ro.rel)
+            closs, _, _ = critic_round(ep, model)
         if it % 25 == 0:
             extra = "" if closs is None else f" critic_loss {closs:.4f} value/step {-loss.item():.4f}"
             print(f"it {it} L={length} step_reward {r.mean().item():.4f} dev {dev.item():.4f} grad {gnorm:.3f}"
