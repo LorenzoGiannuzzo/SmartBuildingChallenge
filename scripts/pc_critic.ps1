@@ -10,7 +10,7 @@
 #        v9_base    same recipe as transformer_v6 (6 h then 12 h, gradient decay 0.95),
 #                   to separate the effect of the new world model;
 #        v9_long    12 h then 24 h horizon, gradient decay 0.99;
-#        v9_critic  6 h then 12 h, gradient decay 0.98, critic with lambda-returns,
+#        v9_critic  6 h then 12 h, gradient decay 0.98, critic trained on 48 h rollouts,
 #                   discount 0.997 (about 28 h), 400 critic-only warm-up iterations;
 #   2. the three are evaluated over 7 days on the 30 official scenarios and on
 #      bench2, reusing the pid_water and transformer_v6 (abl_A) runs of the ablation;
@@ -31,7 +31,7 @@ $train += Get-ChildItem month_data -Directory -Filter "episodes_onpolicy_*" | Fo
 $variants = [ordered]@{
     "base" = @("--lengths", "72", "144", "--grad-decay", "0.95");
     "long" = @("--lengths", "144", "288", "--grad-decay", "0.99");
-    "critic" = @("--lengths", "72", "144", "--grad-decay", "0.98", "--gamma", "0.997", "--critic", "--critic-warmup", "400")
+    "critic" = @("--lengths", "72", "144", "--grad-decay", "0.98", "--gamma", "0.997", "--critic", "--critic-warmup", "400", "--critic-updates", "4")
 }
 foreach ($name in $variants.Keys) {
     if (Test-Path "policies/v9_$name.pt") { Write-Host "variant $name already trained"; continue }
