@@ -37,6 +37,10 @@ MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05, 0.0, 0.0])
 #instead, mostly as is and partly with action noise, so that the world model
 #is corrected exactly in the states the policy visits.
 ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0])
+#Lorenzo Giannuzzo: clean episodes are driven by the policy alone, as it
+#would act on Kaggle; they measure the world-model error on the policy's own
+#trajectories and are not used for training.
+CLEAN_WEIGHTS = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 #Lorenzo Giannuzzo: hybrid collection alternates the DPC policy and
 #pid_water (both with and without noise) with random and extreme segments,
 #covering both the policy's own states and states it would not visit.
@@ -69,7 +73,7 @@ class ExplorationPolicy:
     """Switches between behaviour modes on random segments of 0.5 to 6 hours."""
 
     def __init__(self, meta, action_spec, schema, rng: np.random.Generator, dpc_weights=None,
-                 hybrid=False):
+                 hybrid=False, clean=False):
         from smart_buildings.baselines.pid_plus import PIDWaterResetPolicy
 
         self.dpc = None
@@ -83,7 +87,7 @@ class ExplorationPolicy:
             from sbwm.policy import DPCPolicy
 
             self.pid = DPCPolicy(meta, action_spec, weights=dpc_weights)
-            self.weights, self.noise = ON_POLICY_WEIGHTS, 0.2
+            self.weights, self.noise = (CLEAN_WEIGHTS if clean else ON_POLICY_WEIGHTS), 0.2
         else:
             self.pid = PIDWaterResetPolicy(meta, action_spec)
             self.weights, self.noise = MODE_WEIGHTS, 0.35
@@ -173,7 +177,7 @@ def _run_episode(job: dict) -> str:
     env, meta = _load_env(Path(job["scenario"]), job["start"])
     schema = BuildingSchema.from_meta(meta)
     policy = ExplorationPolicy(meta, env.action_spec(), schema, rng, job.get("dpc_weights"),
-                               job.get("hybrid", False))
+                               job.get("hybrid", False), job.get("clean", False))
 
     #Lorenzo Giannuzzo: the reward function is wrapped so that the exact
     #RewardInfo used by the environment is captured without calling the
@@ -341,6 +345,8 @@ def main():
                     help="alternate the DPC policy and pid_water with exploration segments")
     ap.add_argument("--one-station", action="store_true",
                     help="with --monthly, a single random station per building")
+    ap.add_argument("--clean", action="store_true",
+                    help="with --dpc-weights, the policy alone without exploration segments")
     ap.add_argument("--monthly", action="store_true",
                     help="one episode per scenario folder (building x station) instead of --episodes random ones")
     args = ap.parse_args()
@@ -352,6 +358,8 @@ def main():
                           args.steps, args.seed, args.stations, args.dpc_weights)
         for j in jobs:
             j["hybrid"] = args.hybrid
+    for j in jobs:
+        j["clean"] = args.clean
     print(f"{len(jobs)} episodes, {sum(Path(j['out']).exists() for j in jobs)} already done", flush=True)
     if args.workers == 1:
         for job in jobs:
