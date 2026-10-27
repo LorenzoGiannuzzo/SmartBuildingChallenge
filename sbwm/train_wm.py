@@ -35,36 +35,52 @@ def comfort_term(ep, t, temp):
     return rm["productivity_weight"] * regret
 
 
-def unroll_loss(model, norm, ep, t0, length, w_power=10.0, w_comfort=1.0, zone_boost=3.0):
+def _step_losses(ro, ep, norm, t, state, w_power, w_comfort, zone_boost):
+    """One replayed step: next state and the loss terms of that step."""
+    state, out, new_temp = ro.step(state, t, ep.zact[t], ep.aact[t], ep.hact[t])
+    #Lorenzo Giannuzzo: zones that are occupied and outside, or within 1 K
+    #of, their comfort band weigh more, since that is where the reward is
+    #sensitive to temperature errors and where v1 smoothed excursions.
+    true_t = ep.temp[t]
+    signed = torch.maximum(true_t - ep.csp[t], ep.hsp[t] - true_t)
+    weight = 1.0 + zone_boost * ((ep.occ[t] > 0) & (signed > -1.0)).float()
+    err2 = ((new_temp - true_t) / norm.dtemp_std) ** 2
+    l_temp = (weight * err2).sum() / weight.sum()
+    #Lorenzo Giannuzzo: the comfort term of the reward is also matched
+    #directly, so that the error is measured in the units the DPC loss uses.
+    l_comf = (((comfort_term(ep, t, new_temp) - comfort_term(ep, t, true_t)) / 0.1) ** 2).mean()
+    zt = ((ep.zobs[t + 1] - norm.z_mean) / norm.z_std)[..., list(ZONE_DYN)]
+    at = ((ep.aobs[t + 1] - norm.a_mean) / norm.a_std)[..., list(AHU_DYN)]
+    ht = (ep.hobs[t + 1] - norm.h_mean) / norm.h_std
+    l_zone = ((out["zone_dyn"] - zt) ** 2).mean()
+    l_ahu = ((out["ahu_dyn"] - at) ** 2).mean()
+    l_hws = ((out["hws"] - ht) ** 2).mean()
+    l_pow = ((out["power"] - ep.power[t]) ** 2).mean()
+    loss = l_temp + w_comfort * l_comf + 0.3 * (l_zone + l_ahu + l_hws) + w_power * l_pow
+    return state, loss, torch.stack([l_temp, l_comf, l_zone, l_ahu, l_hws, l_pow])
+
+
+def unroll_loss(model, norm, ep, t0, length, w_power=10.0, w_comfort=1.0, zone_boost=3.0, checkpoint=None):
+    from torch.utils.checkpoint import checkpoint as ckpt
+
+    #Lorenzo Giannuzzo: long unrolls (beyond 4 h) recompute each step in the
+    #backward pass instead of storing it, so memory does not grow with them.
+    if checkpoint is None:
+        checkpoint = length > 48 and torch.is_grad_enabled()
     ro = Rollout(model, norm, ep)
     state = ro.init_state(t0)
     total = 0.0
-    parts = {"temp": 0.0, "comfort": 0.0, "zone": 0.0, "ahu": 0.0, "hws": 0.0, "power": 0.0}
+    acc = torch.zeros(6)
     for i in range(length):
         t = t0 + i
-        state, out, new_temp = ro.step(state, t, ep.zact[t], ep.aact[t], ep.hact[t])
-        #Lorenzo Giannuzzo: zones that are occupied and outside, or within 1 K
-        #of, their comfort band weigh more, since that is where the reward is
-        #sensitive to temperature errors and where v1 smoothed excursions.
-        true_t = ep.temp[t]
-        signed = torch.maximum(true_t - ep.csp[t], ep.hsp[t] - true_t)
-        weight = 1.0 + zone_boost * ((ep.occ[t] > 0) & (signed > -1.0)).float()
-        err2 = ((new_temp - true_t) / norm.dtemp_std) ** 2
-        l_temp = (weight * err2).sum() / weight.sum()
-        #Lorenzo Giannuzzo: the comfort term of the reward is also matched
-        #directly, so that the error is measured in the units the DPC loss uses.
-        l_comf = (((comfort_term(ep, t, new_temp) - comfort_term(ep, t, true_t)) / 0.1) ** 2).mean()
-        zt = ((ep.zobs[t + 1] - norm.z_mean) / norm.z_std)[..., list(ZONE_DYN)]
-        at = ((ep.aobs[t + 1] - norm.a_mean) / norm.a_std)[..., list(AHU_DYN)]
-        ht = (ep.hobs[t + 1] - norm.h_mean) / norm.h_std
-        l_zone = ((out["zone_dyn"] - zt) ** 2).mean()
-        l_ahu = ((out["ahu_dyn"] - at) ** 2).mean()
-        l_hws = ((out["hws"] - ht) ** 2).mean()
-        l_pow = ((out["power"] - ep.power[t]) ** 2).mean()
-        loss = l_temp + w_comfort * l_comf + 0.3 * (l_zone + l_ahu + l_hws) + w_power * l_pow
+        if checkpoint:
+            state, loss, terms = ckpt(_step_losses, ro, ep, norm, t, state, w_power, w_comfort, zone_boost,
+                                      use_reentrant=False)
+        else:
+            state, loss, terms = _step_losses(ro, ep, norm, t, state, w_power, w_comfort, zone_boost)
         total = total + loss / length
-        for k, v in zip(parts, (l_temp, l_comf, l_zone, l_ahu, l_hws, l_pow)):
-            parts[k] += v.item() / length
+        acc += terms.detach() / length
+    parts = dict(zip(("temp", "comfort", "zone", "ahu", "hws", "power"), acc.tolist()))
     return total, parts
 
 
@@ -166,6 +182,8 @@ def main():
     ap.add_argument("--lengths", type=int, nargs="+", default=None,
                     help="unroll-length curriculum in equal shares (default 1, 6, 12, 24 schedule)")
     ap.add_argument("--w-comfort", type=float, default=1.0)
+    ap.add_argument("--mem", action="store_true",
+                    help="long memory per zone (exponential averages of temperature, commands and outdoor air)")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -189,9 +207,18 @@ def main():
     print(f"train files {len(train_files)} (in memory {len(train)}) + emphasis "
           f"{len(focus.files) if focus else 0} | test {len(test)}", flush=True)
 
-    model = WorldModel(d=args.d, layers=args.layers)
+    model = WorldModel(d=args.d, layers=args.layers, mem=args.mem)
     if init:
-        model.load_state_dict(init["model"])
+        sd = init["model"]
+        own = model.state_dict()
+        #Lorenzo Giannuzzo: a model without memory initializes one with memory;
+        #the memory inputs start with zero weights, so the starting model is
+        #exactly the old one and learns to use the memory during fine-tuning.
+        if own["enc_zone.0.weight"].shape[1] > sd["enc_zone.0.weight"].shape[1]:
+            w = sd["enc_zone.0.weight"]
+            sd = {**sd, "enc_zone.0.weight": torch.cat(
+                [w, torch.zeros(w.shape[0], own["enc_zone.0.weight"].shape[1] - w.shape[1])], 1)}
+        model.load_state_dict(sd)
     print("params", sum(p.numel() for p in model.parameters()), flush=True)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.steps, pct_start=0.05)

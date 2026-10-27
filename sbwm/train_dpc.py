@@ -38,7 +38,7 @@ def load_models(paths):
     for p in paths:
         ck = torch.load(p, map_location="cpu", weights_only=False)
         a = ck["args"]
-        m = WorldModel(d=a.get("d", 128), layers=a.get("layers", 4))
+        m = WorldModel(d=a.get("d", 128), layers=a.get("layers", 4), mem=a.get("mem", False))
         m.load_state_dict(ck["model"])
         m.eval()
         for prm in m.parameters():
