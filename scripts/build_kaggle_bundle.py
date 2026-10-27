@@ -31,10 +31,14 @@ sys.path.append(os.path.join(COMPETITION_DATA_FOLDER, 'kaggle_evaluation'))
 sys.path.append(COMPETITION_DATA_FOLDER)
 
 #Lorenzo Giannuzzo: the dataset mount point depends on the Kaggle layout, so
-#the bundle is located by its marker file instead of a fixed path.
-marker = glob.glob('/kaggle/input/**/SBWM_POLICY_BUNDLE', recursive=True)
-assert marker, 'attach the sbwm-policy dataset to this notebook'
+#the bundle is located by its marker file instead of a fixed path. A dataset
+#can hold several bundles, so the marker must also name the wanted weights.
+WANTED = '__WANTED__'
+marker = [m for m in glob.glob('/kaggle/input/**/SBWM_POLICY_BUNDLE', recursive=True)
+          if open(m).read().strip() == 'weights: ' + WANTED]
+assert len(marker) == 1, f'expected one bundle with {WANTED}, found {marker}'
 BUNDLE = os.path.dirname(marker[0])
+print('bundle:', BUNDLE, 'weights:', WANTED, flush=True)
 sys.path.insert(0, BUNDLE)
 
 import numpy as np
@@ -85,9 +89,13 @@ def main():
     shutil.copy(args.weights, bundle / "policy.pt")
     (bundle / "SBWM_POLICY_BUNDLE").write_text(f"weights: {Path(args.weights).name}\n")
     shutil.make_archive(str(out / "sbwm-policy"), "zip", bundle)
+    #Lorenzo Giannuzzo: a copy named after the weights, so that each upload
+    #gets its own folder in the dataset.
+    shutil.copy(out / "sbwm-policy.zip", out / f"sbwm-policy-{Path(args.weights).stem}.zip")
     nb = {
         "cells": [{"cell_type": "code", "execution_count": None, "id": "sbwm-policy", "metadata": {},
-                   "outputs": [], "source": CELL.splitlines(keepends=True)}],
+                   "outputs": [], "source": CELL.replace("__WANTED__", Path(args.weights).name)
+                   .splitlines(keepends=True)}],
         "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
                      "language_info": {"name": "python"}},
         "nbformat": 4, "nbformat_minor": 5,
