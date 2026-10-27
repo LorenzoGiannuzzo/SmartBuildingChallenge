@@ -1,0 +1,11 @@
+[
+ {
+  "policy_pred": -0.02998119726544246,
+  "logged_pred": -0.056894717776837446,
+  "logged_true": -0.06514680416633685,
+  "critic_bias": -0.00041,
+  "critic_corr": 0.729,
+  "critic_mc_mean": -0.03487,
+  "it": 200
+ }
+]
