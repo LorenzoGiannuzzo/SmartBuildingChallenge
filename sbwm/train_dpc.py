@@ -217,7 +217,8 @@ def evaluate(policy, models, norm, episodes, horizon=144, starts=3, seed=0, cach
 
 
 @torch.no_grad()
-def critic_check(policy, critic, model, norm, episodes, gamma, comfort_scale=1.0, horizon=288, starts=3, seed=1):
+def critic_check(policy, critic, model, norm, episodes, gamma, comfort_scale=1.0, horizon=288, starts=3, seed=1,
+                 rclip=0.0):
     """Calibration of the critic against longer imagined rollouts.
 
     From test states, the value predicted at the start is compared with the
@@ -235,6 +236,8 @@ def critic_check(policy, critic, model, norm, episodes, gamma, comfort_scale=1.0
         _, r, states, ts, ro = rollout_return(policy, model, norm, ep, t0, horizon, gamma,
                                               comfort_scale=comfort_scale, keep_states=True)
         v = to_sum(critic_y(critic, [states[0], states[-1]], [ts[0], ts[-1]], ep, norm, ro.rel).mean(0), gamma)
+        if rclip > 0:
+            r = r.clamp(min=-rclip)  # the same floor as in the critic targets
         disc = gamma ** torch.arange(horizon, dtype=r.dtype).unsqueeze(1)
         pred.append((1 - gamma) * v[0])
         mc.append((1 - gamma) * ((disc * r).sum(0) + gamma ** horizon * v[1]))
@@ -296,6 +299,17 @@ def main():
                     help="1: the policy sees the ensemble minimum, 0: the ensemble mean")
     ap.add_argument("--critic-init", default=None, help="checkpoint whose critic is loaded")
     ap.add_argument("--critic-chunk", type=int, default=12, help="states per checkpointed critic call")
+    ap.add_argument("--critic-version", type=int, default=2,
+                    help="2: physical state only (no commands, readbacks or previous actions); 1: policy inputs")
+    ap.add_argument("--actor-mode", choices=["terminal", "lambda"], default="terminal",
+                    help="terminal: rollout return plus the weighted value of the final state; "
+                         "lambda: lambda-returns with the value at every step")
+    ap.add_argument("--critic-beta", type=float, default=0.5, help="weight of the terminal value")
+    ap.add_argument("--critic-rclip", type=float, default=0.1,
+                    help="per-step rewards floored at -rclip in the critic targets (0: no floor)")
+    ap.add_argument("--critic-noise", type=float, default=0.05,
+                    help="state noise (normalized units) on the critic regression inputs")
+    ap.add_argument("--critic-every", type=int, default=1, help="policy iterations per critic rollout")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -339,7 +353,8 @@ def main():
     opt = torch.optim.AdamW(policy.parameters(), lr=args.lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, args.iters)
     critic = target = copt = None
-    critic_args = {"d": args.critic_d, "layers": args.critic_layers, "ens": args.critic_ens}
+    critic_args = {"d": args.critic_d, "layers": args.critic_layers, "ens": args.critic_ens,
+                   "version": args.critic_version}
     if args.critic:
         critic = CriticNet(**critic_args)
         if args.critic_init:
@@ -370,12 +385,14 @@ def main():
             if first:
                 #Lorenzo Giannuzzo: the value starts at the mean reward of the
                 #first rollouts instead of an arbitrary level.
+                r0 = r.clamp(min=-args.critic_rclip) if args.critic_rclip > 0 else r
                 for net in (critic, target):
                     for m in net.members:
-                        m.head_glob.bias.fill_(r.mean().item() / VALUE_SCALE)
+                        m.head_glob.bias.fill_(r0.mean().item() / VALUE_SCALE)
         for _ in range(args.critic_updates):
             closs, ret = critic_loss(critic, target, states, ts, r, ep, norm, ro.rel, args.gamma,
-                                     args.critic_lambda, args.critic_sample, rng)
+                                     args.critic_lambda, args.critic_sample, rng,
+                                     rclip=args.critic_rclip, noise=args.critic_noise)
             copt.zero_grad()
             closs.backward()
             torch.nn.utils.clip_grad_norm_(critic.parameters(), 1.0)
@@ -419,29 +436,40 @@ def main():
             #reached; the value is differentiable with respect to that state, so
             #its gradient flows back through the world model to the actions.
             states, ts, ro = res_ro[3:]
-            ys = [ckpt(critic_y, critic, states[c:c + args.critic_chunk], ts[c:c + args.critic_chunk],
-                       ep, norm, ro.rel, use_reentrant=False)
-                  for c in range(1, len(states), args.critic_chunk)]
-            y = torch.cat(ys, 1)
-            y = y.min(0).values if args.critic_pessimism else y.mean(0)
-            lam_ret = lambda_returns(r, to_sum(y, args.gamma), args.gamma, args.actor_lambda)
-            loss = -(1 - args.gamma) * lam_ret.mean() + args.anchor_weight * dev
+            if args.actor_mode == "terminal":
+                #Lorenzo Giannuzzo: the DPC return stays the main objective and
+                #the critic only adds the (weighted) value of the state reached
+                #at the end of the rollout, as in SHAC; its gradient reaches the
+                #actions only through the world model.
+                y = critic_y(critic, [states[-1]], [ts[-1]], ep, norm, ro.rel)[:, 0]
+                y = y.min(0).values if args.critic_pessimism else y.mean(0)
+                term = args.critic_beta * args.gamma ** length * to_sum(y, args.gamma)
+                loss = -(ret + term).mean() / length + args.anchor_weight * dev
+            else:
+                ys = [ckpt(critic_y, critic, states[c:c + args.critic_chunk], ts[c:c + args.critic_chunk],
+                           ep, norm, ro.rel, use_reentrant=False)
+                      for c in range(1, len(states), args.critic_chunk)]
+                y = torch.cat(ys, 1)
+                y = y.min(0).values if args.critic_pessimism else y.mean(0)
+                lam_ret = lambda_returns(r, to_sum(y, args.gamma), args.gamma, args.actor_lambda)
+                loss = -(1 - args.gamma) * lam_ret.mean() + args.anchor_weight * dev
         opt.zero_grad()
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
         opt.step()
         sched.step()
         closs = None
-        if critic is not None:
+        if critic is not None and it % args.critic_every == 0:
             closs, _, _ = critic_round(ep, model)
         if it % 25 == 0:
-            extra = "" if closs is None else f" critic_loss {closs:.4f} value/step {-loss.item():.4f}"
+            extra = "" if closs is None else f" critic_loss {closs:.4f} objective {-loss.item():.4f}"
             print(f"it {it} L={length} step_reward {r.mean().item():.4f} dev {dev.item():.4f} grad {gnorm:.3f}"
                   f"{extra} | {time.time() - t_start:.0f}s", flush=True)
         if it % args.eval_every == 0 or it == args.iters:
             res = evaluate(policy, models, norm, test, cache=eval_cache)
             if critic is not None:
-                res.update(critic_check(policy, critic, models[0], norm, test, args.gamma, args.comfort_scale))
+                res.update(critic_check(policy, critic, models[0], norm, test, args.gamma, args.comfort_scale,
+                                        rclip=args.critic_rclip))
             res["it"] = it
             log.append(res)
             print(json.dumps(res), flush=True)

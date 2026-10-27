@@ -14,6 +14,15 @@ setpoints, tariffs up to two days ahead), which the policy cannot observe.
 This removes most of the variance due to weather and schedule that a critic
 limited to the policy's observations would have to average out.
 
+Version 2 (the default) sees only the physical state: zone temperatures and
+setpoints, the measured plant sensors (supply air and water temperatures,
+pressures, flows, request counts) and the exogenous future. Commands, their
+readbacks and the previous actions are left out. With them the value could be
+read directly off the last action, and the gradient that the policy receives
+from the critic would skip the world model and follow correlations of the
+policy's own rollouts (for instance plant on with cold states) instead of the
+physics.
+
 Values are in units of mean per-step reward: the critic output ``y`` maps to
 the discounted sum ``V = VALUE_SCALE * y / (1 - gamma)``.
 """
@@ -24,7 +33,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from sbwm.policy import AHU_IN, GLOB_IN, HWS_IN, N_OBS_HIST, ZONE_IN, build_inputs
+from sbwm.policy import AHU_IN, GLOB_IN, HWS_IN, N_OBS_HIST, ZONE_IN, build_inputs, schedule_features
 from sbwm.wm_data import AHU_OAT
 from sbwm.world_model import Block
 
@@ -35,6 +44,17 @@ GLOB_FUT = FUT_SERIES * len(FUT_WINDOWS)
 ZONE_FUT = 1 + len(ZONE_FUT_WINDOWS)
 ZONE_IN_C = ZONE_IN + 1 + ZONE_FUT + 1  # policy inputs, PI integral slot, future occupancy, true temperature
 VALUE_SCALE = 0.01
+#Lorenzo Giannuzzo: physical fields of version 2 (indices in the observation
+#field tuples of sbwm.schema): zone temperature and both setpoint sensors;
+#supply air temperature, static pressure, supply and outside air flow, cooling
+#requests and outdoor air for an AHU; supply water temperature, differential
+#pressure and heating requests for the hot-water loop.
+ZONE_PHYS = (0, 1, 2)
+AHU_PHYS = (0, 2, 4, 6, 8, 14)
+HWS_PHYS = (0, 2, 4)
+ZONE_IN_2 = len(ZONE_PHYS) + (N_OBS_HIST - 1) + 7 + ZONE_FUT + 1
+ZONE_NOISY_2 = (0, 3, 4, ZONE_IN_2 - 1)  # observed temperature, its changes, true temperature
+SIZES = {1: (ZONE_IN_C, AHU_IN, HWS_IN), 2: (ZONE_IN_2, len(AHU_PHYS), len(HWS_PHYS))}
 
 
 def _window_means(x: torch.Tensor, windows) -> torch.Tensor:
@@ -73,8 +93,24 @@ def future_features(ep, norm) -> tuple[torch.Tensor, torch.Tensor]:
     return glob, zone
 
 
+def critic_inputs_v2(state: dict, ep, t: torch.Tensor, norm):
+    """Physical-state token inputs (version 2) for the state before the decision at t."""
+    obs_hist = state["temp_hist"][:, 1:1 + N_OBS_HIST]
+    b = obs_hist.shape[0]
+    diffs = (obs_hist[:, :-1] - obs_hist[:, 1:]) / norm.dtemp_std
+    glob_fut, zone_fut = future_features(ep, norm)
+    true_now = (state["temp_hist"][:, 0] - 295.0) / 5.0
+    zin = torch.cat([state["zobs"][..., list(ZONE_PHYS)], diffs.permute(0, 2, 1), ep.static.expand(b, -1, -1),
+                     zone_fut[t], true_now.unsqueeze(-1)], -1)
+    ain = state["aobs"][..., list(AHU_PHYS)]
+    hin = state["hobs"][..., list(HWS_PHYS)]
+    gobs = ep.gobs[t]
+    gin = torch.cat([gobs, schedule_features(gobs, *ep.sched), glob_fut[t]], -1)
+    return zin, ain, hin, gin
+
+
 def critic_inputs(state: dict, ep, t: torch.Tensor, norm):
-    """Token inputs of the critic for the world-model state before the decision at t."""
+    """Token inputs of the version 1 critic (policy inputs plus privileged ones)."""
     obs_hist = state["temp_hist"][:, 1:1 + N_OBS_HIST]
     zin, ain, hin, gin = build_inputs(
         state["zobs"], state["aobs"], state["hobs"], ep.gobs[t], obs_hist, ep.static,
@@ -90,11 +126,12 @@ def critic_inputs(state: dict, ep, t: torch.Tensor, norm):
 
 
 class _Trunk(nn.Module):
-    def __init__(self, d: int, layers: int, heads: int, ff: int):
+    def __init__(self, d: int, layers: int, heads: int, ff: int, version: int = 2):
         super().__init__()
-        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN_C, d), nn.GELU(), nn.Linear(d, d))
-        self.enc_ahu = nn.Sequential(nn.Linear(AHU_IN, d), nn.GELU(), nn.Linear(d, d))
-        self.enc_hws = nn.Sequential(nn.Linear(HWS_IN, d), nn.GELU(), nn.Linear(d, d))
+        zone_in, ahu_in, hws_in = SIZES[version]
+        self.enc_zone = nn.Sequential(nn.Linear(zone_in, d), nn.GELU(), nn.Linear(d, d))
+        self.enc_ahu = nn.Sequential(nn.Linear(ahu_in, d), nn.GELU(), nn.Linear(d, d))
+        self.enc_hws = nn.Sequential(nn.Linear(hws_in, d), nn.GELU(), nn.Linear(d, d))
         self.enc_glob = nn.Sequential(nn.Linear(GLOB_IN + GLOB_FUT, d), nn.GELU(), nn.Linear(d, d))
         self.type_emb = nn.Parameter(torch.zeros(4, d))
         self.blocks = nn.ModuleList(Block(d, heads, ff) for _ in range(layers))
@@ -127,21 +164,41 @@ class _Trunk(nn.Module):
 class CriticNet(nn.Module):
     """Ensemble of independent entity-token value networks; output (E, B)."""
 
-    def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128, ens: int = 2):
+    def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128, ens: int = 2,
+                 version: int = 1):
         super().__init__()
-        self.members = nn.ModuleList(_Trunk(d, layers, heads, ff) for _ in range(ens))
+        #Lorenzo Giannuzzo: version defaults to 1 so that checkpoints saved
+        #before version 2 existed (no "version" in their arguments) still load.
+        self.version = version
+        self.members = nn.ModuleList(_Trunk(d, layers, heads, ff, version) for _ in range(ens))
 
     def forward(self, zin, ain, hin, gin, rel):
         return torch.stack([m(zin, ain, hin, gin, rel) for m in self.members])
 
 
-def critic_y(critic, states: list[dict], ts: list[torch.Tensor], ep, norm, rel) -> torch.Tensor:
-    """Critic outputs (E, n, B) for n states of the same episode, batched together."""
+def critic_y(critic, states: list[dict], ts: list[torch.Tensor], ep, norm, rel, noise: float = 0.0) -> torch.Tensor:
+    """Critic outputs (E, n, B) for n states of the same episode, batched together.
+
+    With ``noise`` > 0 (version 2, training only) Gaussian noise of that
+    standard deviation, in normalized units, is added to the temperatures and
+    plant sensors, so that the value is fitted on a neighbourhood of each
+    visited state and its gradient with respect to the state stays smooth.
+    """
     b = ts[0].shape[0]
     keys = states[0].keys()
     st = {k: torch.cat([s[k] for s in states]) for k in keys}
     t = torch.cat(ts)
-    y = critic(*critic_inputs(st, ep, t, norm), rel)
+    if critic.version == 2:
+        zin, ain, hin, gin = critic_inputs_v2(st, ep, t, norm)
+        if noise > 0:
+            zn = torch.zeros_like(zin)
+            zn[..., list(ZONE_NOISY_2)] = noise * torch.randn_like(zin[..., list(ZONE_NOISY_2)])
+            an = noise * torch.randn_like(ain)
+            an[..., -1] = 0.0  # outdoor air is exogenous
+            zin, ain, hin = zin + zn, ain + an, hin + noise * torch.randn_like(hin)
+        y = critic(zin, ain, hin, gin, rel)
+    else:
+        y = critic(*critic_inputs(st, ep, t, norm), rel)
     return y.view(y.shape[0], len(states), b)
 
 
@@ -164,19 +221,25 @@ def to_y(v: torch.Tensor, gamma: float) -> torch.Tensor:
     return v * (1.0 - gamma) / VALUE_SCALE
 
 
-def critic_loss(critic, target, states, ts, r, ep, norm, rel, gamma, lam, sample, rng):
+def critic_loss(critic, target, states, ts, r, ep, norm, rel, gamma, lam, sample, rng, rclip=0.0, noise=0.0):
     """Regression of the critic on lambda-return targets from the target critic.
 
     ``states`` holds s_0..s_H of a rollout and ``r`` (H, B) its rewards;
-    gradients do not reach the world model or the policy.
+    gradients do not reach the world model or the policy. With ``rclip`` > 0
+    the per-step rewards are floored at -rclip in the targets, so that the few
+    states where the world model drifts far outside the comfort band (where
+    the quadratic penalty explodes) do not dominate the regression.
     """
     h = r.shape[0]
+    r = r.detach()
+    if rclip > 0:
+        r = r.clamp(min=-rclip)
     with torch.no_grad():
         det = [{k: x.detach() for k, x in s.items()} for s in states]
         v_next = to_sum(critic_y(target, det[1:], ts[1:], ep, norm, rel).mean(0), gamma)
-        ret = lambda_returns(r.detach(), v_next, gamma, lam)
+        ret = lambda_returns(r, v_next, gamma, lam)
     n = max(1, int(round(sample * h)))
     idx = sorted(rng.choice(h, n, replace=False).tolist())
-    y = critic_y(critic, [det[i] for i in idx], [ts[i] for i in idx], ep, norm, rel)
+    y = critic_y(critic, [det[i] for i in idx], [ts[i] for i in idx], ep, norm, rel, noise=noise)
     tgt = to_y(ret[idx], gamma).unsqueeze(0).expand_as(y)
     return F.mse_loss(y, tgt), ret
