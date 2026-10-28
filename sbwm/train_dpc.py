@@ -73,7 +73,7 @@ def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
     return x.detach() + lam * (x - x.detach())
 
 
-def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, anchor=None):
+def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, anchor=None, smooth=0.0):
     zact, aact, hact, pi_int = policy_step(policy, ro, state, ep, t, norm, hard=hard)
     #Lorenzo Giannuzzo: optional trust region, the squared distance from the
     #actions an anchor policy (the one that collected the latest on-policy
@@ -88,7 +88,17 @@ def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, a
     new_state, out, new_temp = ro.step(state, t, zact, aact, hact)
     if pi_int is not None:
         new_state["pi_int"] = pi_int
-    return new_state, reward_from(ep, t, new_temp, out["power"], comfort_scale), dev
+    r = reward_from(ep, t, new_temp, out["power"], comfort_scale)
+    if smooth > 0:
+        #Lorenzo Giannuzzo: training-only penalty on step-to-step changes of the
+        #continuous commands (zone dampers and reheat, supply air, pressure and
+        #recirculation, water temperature and pressure), against the chattering
+        #seen in the control figures; on/off decisions are left free.
+        dz = ((zact - state["zact_prev"]) ** 2).mean((1, 2))
+        da = ((aact[..., 1:] - state["aact_prev"][..., 1:]) ** 2).mean((1, 2))
+        dh = ((hact[:, 1:] - state["hact_prev"][:, 1:]) ** 2).mean(1)
+        r = r - smooth * (dz + da + dh)
+    return new_state, r, dev
 
 
 def init_policy(policy, sd: dict) -> None:
@@ -126,7 +136,8 @@ def needs_checkpoint(ep, length: int) -> bool:
 
 
 def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_decay=1.0,
-                   checkpoint=None, comfort_scale=1.0, anchor=None, return_dev=False, keep_states=False):
+                   checkpoint=None, comfort_scale=1.0, anchor=None, return_dev=False, keep_states=False,
+                   smooth=0.0):
     """Discounted predicted reward (B,) and per-step rewards (L, B).
 
     With ``return_dev`` the mean squared action distance from ``anchor`` over
@@ -157,10 +168,10 @@ def rollout_return(policy, model, norm, ep, t0, length, gamma, hard=True, grad_d
         #the activations of every world-model step over the horizon.
         if checkpoint and torch.is_grad_enabled():
             state, r, dev = ckpt(_closed_loop_step, policy, ro, ep, norm, hard, t, state,
-                                 comfort_scale, anchor, use_reentrant=False)
+                                 comfort_scale, anchor, smooth, use_reentrant=False)
         else:
             state, r, dev = _closed_loop_step(policy, ro, ep, norm, hard, t, state,
-                                              comfort_scale, anchor)
+                                              comfort_scale, anchor, smooth)
         rewards.append(r)
         devs.append(dev)
         #Lorenzo Giannuzzo: backpropagation through many world-model steps can
@@ -272,6 +283,8 @@ def main():
     ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
+    ap.add_argument("--smooth", type=float, default=0.0,
+                    help="weight of the penalty on step-to-step changes of the continuous commands")
     ap.add_argument("--exclude-buildings", nargs="*", default=[],
                     help="building lists (csv with a footprint column); default-footprint buildings are skipped")
     ap.add_argument("--hybrid", action="store_true",
@@ -426,7 +439,8 @@ def main():
         t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
         res_ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
                                 grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
-                                anchor=anchor, return_dev=True, keep_states=critic is not None)
+                                anchor=anchor, return_dev=True, keep_states=critic is not None,
+                                smooth=args.smooth)
         ret, r, dev = res_ro[:3]
         if critic is None:
             loss = -ret.mean() / length + args.anchor_weight * dev
