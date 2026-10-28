@@ -4,13 +4,15 @@
 #     powershell -ExecutionPolicy Bypass -File scripts\pc_dpc_v10.ps1
 #
 # Steps:
-#   1. two policies are fine-tuned from transformer_v6 on world model v10
-#      (comfort correction 1.8, 400 iterations, start states from buildings in
+#   1. three policies are fine-tuned from transformer_v6 on world model v10
+#      (400 iterations, start states from buildings in
 #      the official size range):
 #        v10_base  same recipe as transformer_v6 (6 h then 12 h, gradient decay 0.95);
+#        v10_base10 the same without the comfort correction (1.0), since v10 no
+#                  longer underestimates the comfort term on clean episodes;
 #        v10_long  12 h then 24 h horizon, gradient decay 0.99, which failed on v9
 #                  and tells whether the memory makes long horizons usable;
-#   2. both are evaluated over 7 days on the 30 official scenarios and on
+#   2. all are evaluated over 7 days on the 30 official scenarios and on
 #      bench2, reusing the pid_water and transformer_v6 (abl_A) runs;
 #   3. policies, training logs and results are committed and pushed.
 # Finished steps are skipped on a rerun.
@@ -27,15 +29,16 @@ foreach ($d in "pc_data/episodes", "pc_data/episodes_onpolicy", "pc_data/episode
 $train += Get-ChildItem month_data -Directory -Filter "episodes_onpolicy_*" | ForEach-Object { "month_data/" + $_.Name }
 
 $variants = [ordered]@{
-    "base" = @("--lengths", "72", "144", "--grad-decay", "0.95");
-    "long" = @("--lengths", "144", "288", "--grad-decay", "0.99")
+    "base" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.8");
+    "base10" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.0");
+    "long" = @("--lengths", "144", "288", "--grad-decay", "0.99", "--comfort-scale", "1.8")
 }
 foreach ($name in $variants.Keys) {
     if (Test-Path "policies/v10_$name.pt") { Write-Host "variant $name already trained"; continue }
     $out = "wm_runs/v10_$name"
     $extra = @($variants[$name])
     & $py -m sbwm.train_dpc --wm world_models/wm_v10.pt --train @train --test month_data/episodes_test `
-        --exclude-buildings month_data/buildings_list.csv --out $out --iters 400 --comfort-scale 1.8 `
+        --exclude-buildings month_data/buildings_list.csv --out $out --iters 400 `
         --init policies/transformer_v6.pt --eval-every 200 --threads $Threads --pool 60 --refresh 100 @extra
     if ($LASTEXITCODE -ne 0) { throw "training of variant $name failed" }
     Copy-Item "$out/policy_it00400.pt" "policies/v10_$name.pt"
