@@ -63,7 +63,7 @@ foreach ($name in $variants.Keys) {
     & $py -m sbwm.inspect_control --policies @refs $w --steps 2016 --workers $Workers
     if ($LASTEXITCODE -ne 0) { throw "figures of variant $name failed" }
     git add $w results/train_log_v10_$name.json results/v10_official30.json results/inspect
-    git commit -m "Policy v10_$name: official evaluation and control figures"
+    git commit -m "Policy v10_${name}: official evaluation and control figures"
     git pull --rebase github main
     git push github main
 }
