@@ -12,7 +12,9 @@ kinds of figures are drawn from the recordings:
 * a comparison per scenario across controllers (mean and worst zone, power,
   cumulative reward).
 
-Recordings are kept in results/inspect/recordings (finished ones are reused),
+Recordings are kept in results/inspect/recordings (finished ones are reused;
+``sbwm.eval_policy --record`` writes them during the evaluation, so a policy
+that has been evaluated needs no extra simulation),
 dashboards in results/inspect/<policy>/ and comparisons in
 results/inspect/compare/.
 
@@ -47,6 +49,61 @@ def label(policy: str) -> str:
     return NAMES.get(stem, stem.replace("_", " ").title())
 
 
+class Recorder:
+    """Per-step record of one simulated run, in the layout the figures read.
+
+    Used by ``record`` below and by ``sbwm.eval_policy --record``, so that an
+    evaluation leaves its trajectories behind instead of only their mean.
+    """
+
+    KEYS = ("temp", "hsp", "csp", "occ", "zobs", "aobs", "hobs", "elec_kw", "gas_kw",
+            "comfort", "energy", "carbon", "reward", "hour")
+
+    def __init__(self, schema, start: str):
+        self.s, self.start = schema, start
+        self.rec = {k: [] for k in self.KEYS}
+
+    @staticmethod
+    def _take(o, idx):
+        idx = np.asarray(idx)
+        v = np.full(idx.shape, np.nan, np.float32)
+        v[idx >= 0] = o[idx[idx >= 0]]
+        return v
+
+    def add(self, obs, info, resp, reward):
+        s, rec = self.s, self.rec
+        zri = info.zone_reward_infos
+        rec["temp"].append([zri[z].zone_air_temperature - 273.15 for z in s.zone_rooms])
+        rec["hsp"].append([zri[z].heating_setpoint_temperature - 273.15 for z in s.zone_rooms])
+        rec["csp"].append([zri[z].cooling_setpoint_temperature - 273.15 for z in s.zone_rooms])
+        rec["occ"].append([zri[z].average_occupancy for z in s.zone_rooms])
+        rec["zobs"].append(self._take(obs, s.zone_obs_idx))
+        rec["aobs"].append(self._take(obs, s.ahu_obs_idx))
+        rec["hobs"].append(self._take(obs, s.hws_obs_idx))
+        ahu, blr = info.air_handler_reward_infos, info.boiler_reward_infos
+        rec["elec_kw"].append((sum(ahu[k].blower_electrical_energy_rate + abs(ahu[k].air_conditioning_electrical_energy_rate)
+                                   for k in ahu) + sum(blr[k].pump_electrical_energy_rate for k in blr)) / 1000.0)
+        rec["gas_kw"].append(sum(blr[k].natural_gas_heating_energy_rate for k in blr) / 1000.0)
+        rec["comfort"].append(0.6 * resp.normalized_productivity_regret)
+        rec["energy"].append(-0.2 * resp.normalized_energy_cost)
+        rec["carbon"].append(-0.2 * resp.normalized_carbon_emission)
+        rec["reward"].append(reward)
+        rec["hour"].append(len(rec["hour"]) / 12.0)
+
+    def save(self, path: Path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp.npz")
+        np.savez_compressed(tmp, start=self.start, zone_ahu=self.s.zone_ahu,
+                            **{k: np.asarray(v, np.float32) for k, v in self.rec.items()})
+        tmp.replace(path)
+
+
+def recording_path(scenario, policy: str) -> Path:
+    """results/inspect/recordings/<building>__<station>__<policy>.npz"""
+    parts = Path(scenario).parts[-2:]
+    return REC / f"{parts[0]}__{parts[1]}__{Path(policy).stem}.npz"
+
+
 def record(job: dict) -> str:
     import torch
 
@@ -55,7 +112,7 @@ def record(job: dict) -> str:
 
     torch.set_num_threads(1)
     scen = Path("smart_buildings/training_scenarios") / job["scenario"]
-    out = REC / f"{job['scenario'].replace('/', '__')}__{Path(job['policy']).stem}.npz"
+    out = recording_path(job["scenario"], job["policy"])
     if out.exists():
         return f"skip {out.name}"
     start = re.search(r"^start_timestamp = '(.*)'$", (scen / "config.gin").read_text(), re.M).group(1)
@@ -79,43 +136,17 @@ def record(job: dict) -> str:
 
     env.reward_function.compute_reward = hook
     obs, _ = env.reset()
-
-    def take(o, idx):
-        idx = np.asarray(idx)
-        v = np.full(idx.shape, np.nan, np.float32)
-        v[idx >= 0] = o[idx[idx >= 0]]
-        return v
-
-    rec = {k: [] for k in ("temp", "hsp", "csp", "occ", "zobs", "aobs", "hobs", "elec_kw", "gas_kw",
-                           "comfort", "energy", "carbon", "reward", "hour")}
+    rec = Recorder(s, start)
     for _ in range(job["steps"]):
         a = pol.get_action(obs)
         obs, r, term, trunc, _ = env.step({
             "continuous_action": np.asarray(a["continuous_action"], np.float32),
             "discrete_action": np.asarray(a["discrete_action"], np.int32)})
-        info, resp = cap["info"], cap["resp"]
-        zri = info.zone_reward_infos
-        rec["temp"].append([zri[z].zone_air_temperature - 273.15 for z in s.zone_rooms])
-        rec["hsp"].append([zri[z].heating_setpoint_temperature - 273.15 for z in s.zone_rooms])
-        rec["csp"].append([zri[z].cooling_setpoint_temperature - 273.15 for z in s.zone_rooms])
-        rec["occ"].append([zri[z].average_occupancy for z in s.zone_rooms])
-        rec["zobs"].append(take(obs, s.zone_obs_idx))
-        rec["aobs"].append(take(obs, s.ahu_obs_idx))
-        rec["hobs"].append(take(obs, s.hws_obs_idx))
-        ahu, blr = info.air_handler_reward_infos, info.boiler_reward_infos
-        rec["elec_kw"].append((sum(ahu[k].blower_electrical_energy_rate + abs(ahu[k].air_conditioning_electrical_energy_rate)
-                                   for k in ahu) + sum(blr[k].pump_electrical_energy_rate for k in blr)) / 1000.0)
-        rec["gas_kw"].append(sum(blr[k].natural_gas_heating_energy_rate for k in blr) / 1000.0)
-        rec["comfort"].append(0.6 * resp.normalized_productivity_regret)
-        rec["energy"].append(-0.2 * resp.normalized_energy_cost)
-        rec["carbon"].append(-0.2 * resp.normalized_carbon_emission)
-        rec["reward"].append(r)
-        rec["hour"].append(len(rec["hour"]) / 12.0)
+        rec.add(obs, cap["info"], cap["resp"], r)
         if term or trunc:
             break
-    REC.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(out, start=start, zone_ahu=s.zone_ahu, **{k: np.asarray(v, np.float32) for k, v in rec.items()})
-    return f"done {out.name}: mean reward {np.mean(rec['reward']):.4f}"
+    rec.save(out)
+    return f"done {out.name}: mean reward {np.mean(rec.rec['reward']):.4f}"
 
 
 # --------------------------------------------------------------------------- figures
@@ -298,7 +329,7 @@ def figures(scenarios, policies):
         tag = sc.replace("/", "__")
         nice = sc.replace("building_train_", "Building ").replace("/", ", ").replace("_", " ").title()
         for p in policies:
-            f = REC / f"{tag}__{Path(p).stem}.npz"
+            f = recording_path(sc, p)
             if not f.exists():
                 continue
             d = dict(np.load(f))

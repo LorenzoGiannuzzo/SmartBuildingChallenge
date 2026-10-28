@@ -19,7 +19,7 @@ foreach ($b in "official30", "bench2") {
 foreach ($w in Get-ChildItem policies -Filter "v9_*.pt" | Sort-Object Name) {
     $wp = "policies/" + $w.Name
     & $py -m sbwm.eval_policy --scenarios smart_buildings/training_scenarios --policies pid_water dpc `
-        --weights $wp --steps 2016 --workers $Workers --out results/critic_official30.json
+        --weights $wp --steps 2016 --workers $Workers --record --out results/critic_official30.json
     & $py -m sbwm.eval_policy --scenarios bench2_data/scenarios --policies pid_water dpc `
         --weights $wp --steps 2016 --workers $Workers --out results/critic_bench2.json
 }

@@ -56,14 +56,27 @@ def _run(job: dict) -> dict:
     reward_fn = env.reward_function
     original = reward_fn.compute_reward
     comps = []
+    cap = {}
 
     def hook(info):
         resp = original(info)
         comps.append((resp.normalized_productivity_regret, resp.normalized_energy_cost,
                       resp.normalized_carbon_emission))
+        cap["info"], cap["resp"] = info, resp
         return resp
 
     reward_fn.compute_reward = hook
+    #Lorenzo Giannuzzo: with recording on, the run's trajectory is kept for the
+    #control figures (sbwm.inspect_control), so they need no second simulation.
+    recorder = out = None
+    if job.get("record"):
+        from sbwm.inspect_control import Recorder, recording_path
+        from sbwm.schema import BuildingSchema
+
+        name = job["weights"] if job["policy"] == "dpc" else job["policy"]
+        out = recording_path(scen, name)
+        if not out.exists():
+            recorder = Recorder(BuildingSchema.from_meta(meta), start)
     obs, _ = env.reset()
     rewards = []
     t0 = time.time()
@@ -73,8 +86,12 @@ def _run(job: dict) -> dict:
             "continuous_action": np.asarray(a["continuous_action"], np.float32),
             "discrete_action": np.asarray(a["discrete_action"], np.int32)})
         rewards.append(r)
+        if recorder is not None:
+            recorder.add(obs, cap["info"], cap["resp"], r)
         if term or trunc:
             break
+    if recorder is not None:
+        recorder.save(out)
     c = np.asarray(comps[-len(rewards):])
     return {**job, "mean_reward": float(np.mean(rewards)), "steps_done": len(rewards),
             "comfort": float(0.6 * c[:, 0].mean()), "energy": float(-0.2 * c[:, 1].mean()),
@@ -91,12 +108,20 @@ def main():
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", default=None)
     ap.add_argument("--params", default="", help="zonepi parameters, e.g. margin=0.5,ki=0.02")
+    ap.add_argument("--record", action="store_true",
+                    help="keep the trajectories of the standard inspection scenarios (results/inspect/recordings)")
+    ap.add_argument("--record-all", action="store_true", help="keep the trajectories of every scenario")
     args = ap.parse_args()
     scen = sorted(p for p in Path(args.scenarios).glob("*/*") if (p / "config.gin").exists())
     if args.filter:
         scen = [p for p in scen if any(f in str(p) for f in args.filter)]
+    from sbwm.inspect_control import STANDARD
+
+    def wants(s):
+        return args.record_all or (args.record and "/".join(Path(s).parts[-2:]) in STANDARD)
+
     jobs = [{"scenario": str(s), "policy": p, "steps": args.steps, "weights": args.weights,
-             "params": args.params} for s in scen for p in args.policies]
+             "params": args.params, "record": wants(s)} for s in scen for p in args.policies]
     results = []
     #Lorenzo Giannuzzo: results are saved after every run and reused on a
     #restart, so a long evaluation can be interrupted and resumed.
