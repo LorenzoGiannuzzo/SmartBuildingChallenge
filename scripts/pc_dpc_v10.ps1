@@ -14,7 +14,8 @@
 #                  and tells whether the memory makes long horizons usable;
 #   2. all are evaluated over 7 days on the 30 official scenarios and on
 #      bench2, reusing the pid_water and transformer_v6 (abl_A) runs;
-#   3. policies, training logs and results are committed and pushed.
+#   3. control figures of the three against the references (results/inspect);
+#   4. policies, training logs, results and figures are committed and pushed.
 # Finished steps are skipped on a rerun.
 param([int]$Workers = 10, [int]$Threads = 8)
 $ErrorActionPreference = "Stop"
@@ -56,7 +57,12 @@ foreach ($name in $variants.Keys) {
         --weights $w --steps 2016 --workers $Workers --out results/v10_bench2.json
 }
 
-git add policies/v10_*.pt results/train_log_v10_*.json results/v10_official30.json results/v10_bench2.json
+#Lorenzo Giannuzzo: control figures of the new policies against the references.
+& $py -m sbwm.inspect_control --policies pid_water policies/transformer_v6.pt policies/abl_A10.pt `
+    @($variants.Keys | ForEach-Object { "policies/v10_$_.pt" }) --steps 2016 --workers $Workers
+if ($LASTEXITCODE -ne 0) { throw "inspection failed" }
+
+git add policies/v10_*.pt results/train_log_v10_*.json results/v10_official30.json results/v10_bench2.json results/inspect
 git commit -m "Policies on world model v10 with evaluations"
 git pull --rebase github main
 git push github main

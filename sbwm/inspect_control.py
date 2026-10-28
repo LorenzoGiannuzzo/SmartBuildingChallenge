@@ -12,9 +12,13 @@ kinds of figures are drawn from the recordings:
 * a comparison per scenario across controllers (mean and worst zone, power,
   cumulative reward).
 
-Usage:
-    python -m sbwm.inspect_control --scenarios building_train_1/fairbanks_1 building_train_1/phoenix_5 \
-        --policies pid_water policies/transformer_v6.pt policies/abl_A10.pt --steps 2016 --workers 2
+Recordings are kept in results/inspect/recordings (finished ones are reused),
+dashboards in results/inspect/<policy>/ and comparisons in
+results/inspect/compare/.
+
+Usage (the default scenarios are the standard set below):
+    python -m sbwm.inspect_control --policies pid_water policies/transformer_v6.pt policies/abl_A10.pt \
+        --steps 2016 --workers 2
 """
 
 from __future__ import annotations
@@ -27,6 +31,11 @@ from pathlib import Path
 import numpy as np
 
 OUT = Path("results/inspect")
+REC = OUT / "recordings"
+#Lorenzo Giannuzzo: the standard set covers the hardest official scenarios
+#(Fairbanks and Denver in winter, Phoenix in summer) and a mild one.
+STANDARD = ["building_train_1/fairbanks_1", "building_train_2/fairbanks_2", "building_train_1/phoenix_5",
+            "building_train_2/denver_8", "building_train_8/atlanta_1"]
 NAMES = {"pid_water": "PID With Water Reset", "transformer_v6": "Transformer v6 (Comfort Correction 1.8)",
          "abl_A10": "Transformer A10 (No Comfort Correction)", "v10_base": "Transformer On World Model v10",
          "v10_base10": "Transformer On World Model v10 (No Comfort Correction)",
@@ -46,7 +55,7 @@ def record(job: dict) -> str:
 
     torch.set_num_threads(1)
     scen = Path("smart_buildings/training_scenarios") / job["scenario"]
-    out = OUT / f"{job['scenario'].replace('/', '__')}__{Path(job['policy']).stem}.npz"
+    out = REC / f"{job['scenario'].replace('/', '__')}__{Path(job['policy']).stem}.npz"
     if out.exists():
         return f"skip {out.name}"
     start = re.search(r"^start_timestamp = '(.*)'$", (scen / "config.gin").read_text(), re.M).group(1)
@@ -104,7 +113,7 @@ def record(job: dict) -> str:
         rec["hour"].append(len(rec["hour"]) / 12.0)
         if term or trunc:
             break
-    OUT.mkdir(parents=True, exist_ok=True)
+    REC.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, start=start, zone_ahu=s.zone_ahu, **{k: np.asarray(v, np.float32) for k, v in rec.items()})
     return f"done {out.name}: mean reward {np.mean(rec['reward']):.4f}"
 
@@ -282,28 +291,31 @@ def comparison(plt, runs, title, path):
 
 
 def figures(scenarios, policies):
+    """Dashboards in results/inspect/<policy>/, comparisons in results/inspect/compare/."""
     plt = _style()
     for sc in scenarios:
         runs = {}
+        tag = sc.replace("/", "__")
+        nice = sc.replace("building_train_", "Building ").replace("/", ", ").replace("_", " ").title()
         for p in policies:
-            f = OUT / f"{sc.replace('/', '__')}__{Path(p).stem}.npz"
+            f = REC / f"{tag}__{Path(p).stem}.npz"
             if not f.exists():
                 continue
             d = dict(np.load(f))
             runs[label(p)] = d
-            tag = f"{sc.replace('/', '__')}__{Path(p).stem}"
-            nice = sc.replace("building_train_", "Building ").replace("/", ", ").replace("_", " ").title()
-            dashboard(plt, d, f"{label(p)}, {nice}, From {d['start']}", OUT / f"dashboard__{tag}.png")
+            folder = OUT / Path(p).stem
+            folder.mkdir(parents=True, exist_ok=True)
+            dashboard(plt, d, f"{label(p)}, {nice}, From {d['start']}", folder / f"dashboard__{tag}.png")
         if runs:
-            nice = sc.replace("building_train_", "Building ").replace("/", ", ").replace("_", " ").title()
-            comparison(plt, runs, f"Controllers Compared, {nice}", OUT / f"compare__{sc.replace('/', '__')}.png")
-            reward_terms(plt, runs, f"Reward Terms Per Step, {nice}", OUT / f"terms__{sc.replace('/', '__')}.png")
+            (OUT / "compare").mkdir(parents=True, exist_ok=True)
+            comparison(plt, runs, f"Controllers Compared, {nice}", OUT / "compare" / f"{tag}.png")
+            reward_terms(plt, runs, f"Reward Terms Per Step, {nice}", OUT / "compare" / f"terms__{tag}.png")
             print("figures for", sc, flush=True)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scenarios", nargs="+", default=["building_train_1/fairbanks_1"])
+    ap.add_argument("--scenarios", nargs="+", default=STANDARD)
     ap.add_argument("--policies", nargs="+", default=["pid_water", "policies/transformer_v6.pt"])
     ap.add_argument("--steps", type=int, default=2016)
     ap.add_argument("--workers", type=int, default=2)
