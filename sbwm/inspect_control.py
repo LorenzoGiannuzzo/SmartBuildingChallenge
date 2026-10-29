@@ -41,7 +41,9 @@ STANDARD = ["building_train_1/fairbanks_1", "building_train_2/fairbanks_2", "bui
 NAMES = {"pid_water": "PID With Water Reset", "transformer_v6": "Transformer v6 (Comfort Correction 1.8)",
          "abl_A10": "Transformer A10 (No Comfort Correction)", "v10_base": "Transformer On World Model v10",
          "v10_base10": "Transformer On World Model v10 (No Comfort Correction)",
-         "v10_long": "Transformer On World Model v10 (24 h Horizon)"}
+         "v10_long": "Transformer On World Model v10 (24 h Horizon)",
+         "v10_smooth2": "Transformer On World Model v10 (Smoothness 0.002)",
+         "v10_smooth5": "Transformer On World Model v10 (Smoothness 0.005)"}
 
 
 def label(policy: str) -> str:

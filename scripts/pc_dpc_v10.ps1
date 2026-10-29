@@ -4,11 +4,14 @@
 #     powershell -ExecutionPolicy Bypass -File scripts\pc_dpc_v10.ps1
 #
 # Steps:
-#   1. three policies are fine-tuned from transformer_v6 on world model v10
+#   1. five policies are fine-tuned from transformer_v6 on world model v10
 #      (400 iterations, start states from buildings in the official size range):
 #        v10_base10 the recipe of transformer_v6 without comfort correction (1.0),
 #                   since v10 no longer underestimates the comfort term;
 #        v10_base   the same with the comfort correction 1.8;
+#        v10_smooth2, v10_smooth5  v10_base with a penalty (0.002, 0.005) on
+#                   step-to-step changes of the continuous commands, against the
+#                   supply-air and damper oscillations seen in v10_base;
 #        v10_long   12 h then 24 h horizon, gradient decay 0.99, which failed on v9
 #                   and tells whether the memory makes long horizons usable;
 #   2. after each training the policy is evaluated over 7 days on the 30
@@ -34,6 +37,8 @@ $train += Get-ChildItem month_data -Directory -Filter "episodes_onpolicy_*" | Fo
 $variants = [ordered]@{
     "base10" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.0");
     "base" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.8");
+    "smooth2" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.8", "--smooth", "0.002");
+    "smooth5" = @("--lengths", "72", "144", "--grad-decay", "0.95", "--comfort-scale", "1.8", "--smooth", "0.005");
     "long" = @("--lengths", "144", "288", "--grad-decay", "0.99", "--comfort-scale", "1.8")
 }
 foreach ($b in "official30", "bench2") {
