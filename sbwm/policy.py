@@ -276,6 +276,10 @@ class DPCPolicy:
         self.hact_prev = -torch.ones(1, 3)
         self.pi_int = torch.zeros(1, self.v) if self.net.hybrid else None
         self.zone_ahu = torch.as_tensor(self.s.zone_ahu)
+        #Lorenzo Giannuzzo: the command filter travels with the checkpoint
+        #("action_filter"), so evaluation and the Kaggle bundle need no change.
+        self.alpha = ck.get("action_filter")
+        self.c_prev = None
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -313,7 +317,18 @@ class DPCPolicy:
             aact, hact = hybrid_plant(aact, hact, u, self.zone_ahu, self.s.num_ahus, self.net.pi,
                                       band_excess(zobs_n))
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
-        return to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
+        out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
+        if self.alpha is not None:
+            #Lorenzo Giannuzzo: optional low-pass filter on the continuous commands
+            #sent to the building (each new command weighs alpha, the previous one
+            #1 - alpha), against the closed-loop oscillations of the real plant;
+            #the policy's own inputs keep its unfiltered outputs, as in training.
+            c = out["continuous_action"]
+            if self.c_prev is not None:
+                c = (self.alpha * c + (1.0 - self.alpha) * self.c_prev).astype(np.float32)
+            self.c_prev = c
+            out["continuous_action"] = c
+        return out
 
 
 def to_env_action(s, zact, aact, hact) -> dict[str, np.ndarray]:
