@@ -428,6 +428,7 @@ def main():
     log = []
     best = -1e9
     eval_cache = {}
+    skipped = 0
     for it in range(1, args.iters + 1):
         #Lorenzo Giannuzzo: the horizon grows along the curriculum (by default
         #2, 4 and 6 hours), long enough to see the effect of preconditioning.
@@ -470,7 +471,15 @@ def main():
         opt.zero_grad()
         loss.backward()
         gnorm = torch.nn.utils.clip_grad_norm_(policy.parameters(), 1.0)
-        opt.step()
+        #Lorenzo Giannuzzo: a rollout that blows up in the world model gives an
+        #infinite or NaN gradient; that update is skipped, since one of them is
+        #enough to turn the weights into NaN (v10_long on the PC).
+        if torch.isfinite(loss) and torch.isfinite(gnorm):
+            opt.step()
+        else:
+            opt.zero_grad()
+            skipped += 1
+            print(f"it {it}: non-finite loss or gradient, update skipped ({skipped} so far)", flush=True)
         sched.step()
         closs = None
         if critic is not None and it % args.critic_every == 0:
