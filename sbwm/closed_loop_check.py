@@ -66,6 +66,7 @@ def main():
     policy = PolicyNet(**ck["policy_args"])
     policy.load_state_dict(ck["policy"])
     policy.eval()
+    policy.action_filter = ck.get("action_filter") if ck.get("filter_in_training") else None
     for f in sorted(Path(args.episodes).glob("*.npz")):
         print(f.name, check(models[0], norm, policy, load_episode(f)), flush=True)
 

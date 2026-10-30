@@ -167,6 +167,19 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
     return aact, hact
 
 
+def filter_actions(alpha: float, zact, aact, hact, zprev, aprev, hprev):
+    """Low-pass filter on the continuous commands (on/off decisions untouched).
+
+    Each new command weighs ``alpha`` and the previously applied one
+    ``1 - alpha``; used inside DPC rollouts when the policy is trained with
+    the filter, and at deployment.
+    """
+    zact = alpha * zact + (1.0 - alpha) * zprev
+    aact = torch.cat([aact[..., :1], alpha * aact[..., 1:] + (1.0 - alpha) * aprev[..., 1:]], -1)
+    hact = torch.cat([hact[..., :1], alpha * hact[..., 1:] + (1.0 - alpha) * hprev[..., 1:]], -1)
+    return zact, aact, hact
+
+
 class PolicyNet(nn.Module):
     def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128,
                  hybrid: bool = False, pi: dict | None = None):
@@ -280,6 +293,10 @@ class DPCPolicy:
         #("action_filter"), so evaluation and the Kaggle bundle need no change.
         self.alpha = ck.get("action_filter")
         self.c_prev = None
+        #Lorenzo Giannuzzo: a policy trained with the filter sees the filtered
+        #(applied) commands as its previous actions, as in its training rollouts.
+        self.filter_in_training = bool(ck.get("filter_in_training", False))
+        self.first = True
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -316,9 +333,13 @@ class DPCPolicy:
                                                        self.hist[:, 0] - self.hist[:, 1])
             aact, hact = hybrid_plant(aact, hact, u, self.zone_ahu, self.s.num_ahus, self.net.pi,
                                       band_excess(zobs_n))
+        if self.filter_in_training and self.alpha is not None and not self.first:
+            zact, aact, hact = filter_actions(self.alpha, zact, aact, hact,
+                                              self.zact_prev, self.aact_prev, self.hact_prev)
+        self.first = False
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
-        if self.alpha is not None:
+        if self.alpha is not None and not self.filter_in_training:
             #Lorenzo Giannuzzo: optional low-pass filter on the continuous commands
             #sent to the building (each new command weighs alpha, the previous one
             #1 - alpha), against the closed-loop oscillations of the real plant;

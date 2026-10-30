@@ -144,6 +144,7 @@ def main():
     policy = PolicyNet(**ck["policy_args"])
     policy.load_state_dict(ck["policy"])
     policy.eval()
+    policy.action_filter = ck.get("action_filter") if ck.get("filter_in_training") else None
     files = sorted(f for d in args.episodes for f in Path(d).glob("*.npz"))
     episodes = [load_episode(f) for f in files]
     print(f"{len(episodes)} episodes", flush=True)

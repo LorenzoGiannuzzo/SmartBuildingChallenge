@@ -25,7 +25,8 @@ import torch
 from torch.utils.checkpoint import checkpoint as ckpt
 
 from sbwm.critic import VALUE_SCALE, CriticNet, critic_loss, critic_y, lambda_returns, to_sum
-from sbwm.policy import N_OBS_HIST, PI_WARMUP, PolicyNet, band_excess, build_inputs, hybrid_plant, hybrid_zone_actions
+from sbwm.policy import (N_OBS_HIST, PI_WARMUP, PolicyNet, band_excess, build_inputs, filter_actions, hybrid_plant,
+                         hybrid_zone_actions)
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
@@ -65,6 +66,12 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
                                               obs_hist[:, 0] - obs_hist[:, 1])
         aact, hact = hybrid_plant(aact, hact, u, torch.as_tensor(ep.schema.zone_ahu),
                                   ep.schema.num_ahus, policy.pi, band_excess(state["zobs"]))
+    alpha = getattr(policy, "action_filter", None)
+    if alpha is not None:
+        #Lorenzo Giannuzzo: the commands reach the world model through the same
+        #filter used at deployment, so the policy learns with it in the loop.
+        zact, aact, hact = filter_actions(alpha, zact, aact, hact,
+                                          state["zact_prev"], state["aact_prev"], state["hact_prev"])
     return zact, aact, hact, pi_int
 
 
@@ -283,6 +290,8 @@ def main():
     ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
+    ap.add_argument("--action-filter", type=float, default=None,
+                    help="train with the low-pass command filter in the loop (weight of the new command)")
     ap.add_argument("--smooth", type=float, default=0.0,
                     help="weight of the penalty on step-to-step changes of the continuous commands")
     ap.add_argument("--exclude-buildings", nargs="*", default=[],
@@ -353,6 +362,7 @@ def main():
     policy = PolicyNet(**policy_args)
     if args.init:
         init_policy(policy, torch.load(args.init, weights_only=False)["policy"])
+    policy.action_filter = args.action_filter
     anchor = None
     if args.anchor:
         ack = torch.load(args.anchor, weights_only=False)
@@ -500,6 +510,8 @@ def main():
                   "norm": norm.state_dict(), "wm": args.wm, "it": it, "eval": res}
             if critic is not None:
                 ck.update(critic=critic.state_dict(), critic_args=critic_args)
+            if args.action_filter is not None:
+                ck.update(action_filter=args.action_filter, filter_in_training=True)
             torch.save(ck, out / "policy_last.pt")
             torch.save(ck, out / f"policy_it{it:05d}.pt")
             if res["policy_pred"] > best:
