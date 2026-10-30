@@ -31,20 +31,26 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-MODES = ("pid", "pid_noise", "random_hold", "off", "max_heat", "max_cool", "dpc", "dpc_noise")
-MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05, 0.0, 0.0])
+MODES = ("pid", "pid_noise", "random_hold", "off", "max_heat", "max_cool", "dpc", "dpc_noise", "plant_probe")
+MODE_WEIGHTS = np.array([0.30, 0.30, 0.25, 0.05, 0.05, 0.05, 0.0, 0.0, 0.0])
 #Lorenzo Giannuzzo: on-policy collection, the "pid" modes run the DPC policy
 #instead, mostly as is and partly with action noise, so that the world model
 #is corrected exactly in the states the policy visits.
-ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0])
+ON_POLICY_WEIGHTS = np.array([0.55, 0.35, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0])
+#Lorenzo Giannuzzo: on-policy collection with plant probes: in a quarter of the
+#segments the policy drives the zones while the hot-water temperature, the
+#supply-air temperature and the static pressure are held at random levels, a
+#controlled experiment on commands the policy otherwise keeps almost constant
+#(the water stays at its minimum), so the world model learns their effect.
+PROBE_WEIGHTS = np.array([0.45, 0.20, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0, 0.25])
 #Lorenzo Giannuzzo: clean episodes are driven by the policy alone, as it
 #would act on Kaggle; they measure the world-model error on the policy's own
 #trajectories and are not used for training.
-CLEAN_WEIGHTS = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+CLEAN_WEIGHTS = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 #Lorenzo Giannuzzo: hybrid collection alternates the DPC policy and
 #pid_water (both with and without noise) with random and extreme segments,
 #covering both the policy's own states and states it would not visit.
-HYBRID_WEIGHTS = np.array([0.15, 0.10, 0.10, 0.05, 0.025, 0.025, 0.35, 0.20])
+HYBRID_WEIGHTS = np.array([0.15, 0.10, 0.10, 0.05, 0.025, 0.025, 0.35, 0.20, 0.0])
 
 
 def _load_env(scenario_dir: Path, start: str):
@@ -73,7 +79,7 @@ class ExplorationPolicy:
     """Switches between behaviour modes on random segments of 0.5 to 6 hours."""
 
     def __init__(self, meta, action_spec, schema, rng: np.random.Generator, dpc_weights=None,
-                 hybrid=False, clean=False):
+                 hybrid=False, clean=False, probe=False):
         from smart_buildings.baselines.pid_plus import PIDWaterResetPolicy
 
         self.dpc = None
@@ -87,7 +93,7 @@ class ExplorationPolicy:
             from sbwm.policy import DPCPolicy
 
             self.pid = DPCPolicy(meta, action_spec, weights=dpc_weights)
-            self.weights, self.noise = (CLEAN_WEIGHTS if clean else ON_POLICY_WEIGHTS), 0.2
+            self.weights, self.noise = (CLEAN_WEIGHTS if clean else PROBE_WEIGHTS if probe else ON_POLICY_WEIGHTS), 0.2
         else:
             self.pid = PIDWaterResetPolicy(meta, action_spec)
             self.weights, self.noise = MODE_WEIGHTS, 0.35
@@ -102,6 +108,13 @@ class ExplorationPolicy:
         self.mode = MODES[self.rng.choice(len(MODES), p=self.weights)]
         self.left = int(self.rng.integers(6, 73))
         s = self.s
+        if self.mode == "plant_probe":
+            #Lorenzo Giannuzzo: one level per segment for each probed command.
+            self.probe = {
+                "water": float(self.rng.uniform(-1, 1)),
+                "supply": self.rng.uniform(-1, 1, len(s.ahu_temp_act)).astype(np.float32),
+                "pressure": self.rng.uniform(-1, 1, len(s.ahu_pressure_act)).astype(np.float32),
+            }
         if self.mode == "random_hold":
             self.hold_c = self.rng.uniform(-1, 1, s.n_continuous).astype(np.float32)
             #Lorenzo Giannuzzo: AHUs and pump are switched on with high
@@ -153,6 +166,13 @@ class ExplorationPolicy:
             d = np.zeros_like(d)
         elif self.mode in ("max_heat", "max_cool"):
             c, d = self.ext[0].copy(), self.ext[1].copy()
+        elif self.mode == "plant_probe":
+            s = self.s
+            c[s.ahu_temp_act] = self.probe["supply"]
+            c[s.ahu_pressure_act] = self.probe["pressure"]
+            if s.hws_temp_act >= 0:
+                c[s.hws_temp_act] = self.probe["water"]
+            d[s.hws_run_act] = 1  # the loop runs, so the water level acts on the reheat coils
         return c, d, MODES.index(self.mode)
 
 
@@ -177,7 +197,7 @@ def _run_episode(job: dict) -> str:
     env, meta = _load_env(Path(job["scenario"]), job["start"])
     schema = BuildingSchema.from_meta(meta)
     policy = ExplorationPolicy(meta, env.action_spec(), schema, rng, job.get("dpc_weights"),
-                               job.get("hybrid", False), job.get("clean", False))
+                               job.get("hybrid", False), job.get("clean", False), job.get("probe", False))
 
     #Lorenzo Giannuzzo: the reward function is wrapped so that the exact
     #RewardInfo used by the environment is captured without calling the
@@ -345,6 +365,8 @@ def main():
                     help="alternate the DPC policy and pid_water with exploration segments")
     ap.add_argument("--one-station", action="store_true",
                     help="with --monthly, a single random station per building")
+    ap.add_argument("--probe", action="store_true",
+                    help="with --dpc-weights, a quarter of the segments probe the plant commands")
     ap.add_argument("--clean", action="store_true",
                     help="with --dpc-weights, the policy alone without exploration segments")
     ap.add_argument("--monthly", action="store_true",
@@ -360,6 +382,7 @@ def main():
             j["hybrid"] = args.hybrid
     for j in jobs:
         j["clean"] = args.clean
+        j["probe"] = args.probe
     print(f"{len(jobs)} episodes, {sum(Path(j['out']).exists() for j in jobs)} already done", flush=True)
     if args.workers == 1:
         for job in jobs:

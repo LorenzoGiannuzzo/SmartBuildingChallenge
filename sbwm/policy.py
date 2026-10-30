@@ -28,7 +28,8 @@ HWS_IN = 7 + 3
 GLOB_IN = 7 + 3
 
 
-def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> torch.Tensor:
+def schedule_features(gobs: torch.Tensor, morning: float, evening: float,
+                      eco: torch.Tensor | None = None) -> torch.Tensor:
     """Hours to the next comfort start, hours left in comfort, weekday flag.
 
     Decoded from the cyclic time features and the schedule hours that are part
@@ -46,6 +47,12 @@ def schedule_features(gobs: torch.Tensor, morning: float, evening: float) -> tor
         hours = k * 24.0 + morning - hour
         to_start = torch.where(ok, torch.minimum(to_start, hours), to_start)
     in_comfort = (weekday > 0) & (hour >= morning) & (hour < evening)
+    if eco is not None:
+        #Lorenzo Giannuzzo: a scheduled comfort period whose setpoints stay in
+        #the reduced band is a non-working day (a holiday), seen as a weekend.
+        off = in_comfort & (eco > 0)
+        weekday = torch.where(off, torch.zeros_like(weekday), weekday)
+        in_comfort = in_comfort & ~off
     left = torch.where(in_comfort, evening - hour, torch.zeros_like(hour))
     return torch.stack([torch.clamp(to_start, max=72.0) / 24.0, left / 12.0, weekday], -1)
 
@@ -167,6 +174,31 @@ def hybrid_plant(aact: torch.Tensor, hact: torch.Tensor, u: torch.Tensor, zone_a
     return aact, hact
 
 
+#Lorenzo Giannuzzo: optional long memory of the policy, the same quantities as
+#the world-model memory (sbwm.world_model): each zone's observed temperature
+#against its 1, 6 and 24 h averages, its 6 and 24 h averages of reheat and
+#damper commands, and the outdoor air against its 6 and 24 h averages.
+POLICY_MEM_IN = 9
+ECO_WIDTH_K = 6.0  # setpoint band wider than this: reduced (unoccupied) mode
+
+
+def memory_features(mem: torch.Tensor, temp_obs: torch.Tensor, oat_feat: torch.Tensor) -> torch.Tensor:
+    """(B, V, 9) policy memory inputs from the memory state (B, V, 7), the
+    observed zone temperatures (B, V) [K] and the outdoor-air features (B, 2)."""
+    from sbwm.world_model import MEM_T_TAUS
+
+    nt = len(MEM_T_TAUS)
+    v = mem.shape[1]
+    return torch.cat([(mem[..., :nt] - temp_obs.unsqueeze(-1)) / 2.0, mem[..., nt:],
+                      oat_feat.unsqueeze(1).expand(-1, v, -1)], -1)
+
+
+def eco_mode(zobs_n: torch.Tensor) -> torch.Tensor:
+    """(B,) 1 when the median zone setpoint band is in reduced mode."""
+    width = (zobs_n[..., 2] - zobs_n[..., 1]) * 5.0
+    return (width.median(-1).values > ECO_WIDTH_K).float()
+
+
 def filter_actions(alpha: float, zact, aact, hact, zprev, aprev, hprev):
     """Low-pass filter on the continuous commands (on/off decisions untouched).
 
@@ -182,14 +214,19 @@ def filter_actions(alpha: float, zact, aact, hact, zprev, aprev, hprev):
 
 class PolicyNet(nn.Module):
     def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128,
-                 hybrid: bool = False, pi: dict | None = None):
+                 hybrid: bool = False, pi: dict | None = None, mem: bool = False, holiday: bool = False):
         super().__init__()
+        #Lorenzo Giannuzzo: mem adds the long memory to each zone token; holiday
+        #turns scheduled days in reduced setpoint mode into weekend days.
+        self.mem = mem
+        self.holiday = holiday
         #Lorenzo Giannuzzo: the hybrid variant sees each zone's PI integral as
         #one extra input and outputs the PI supervision instead of the
         #actuator commands.
         self.hybrid = hybrid
         self.pi = {**PI_DEFAULTS, **(pi or {})}
-        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + int(hybrid), d), nn.GELU(), nn.Linear(d, d))
+        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + int(hybrid) + POLICY_MEM_IN * int(mem), d), nn.GELU(),
+                                      nn.Linear(d, d))
         self.enc_ahu = nn.Sequential(nn.Linear(AHU_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_hws = nn.Sequential(nn.Linear(HWS_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_glob = nn.Sequential(nn.Linear(GLOB_IN, d), nn.GELU(), nn.Linear(d, d))
@@ -240,17 +277,20 @@ class PolicyNet(nn.Module):
 
 
 def build_inputs(zobs_n, aobs_n, hobs_n, gobs, obs_hist, static, zact_prev, aact_prev,
-                 hact_prev, sched, dtemp_std, pi_int=None):
+                 hact_prev, sched, dtemp_std, pi_int=None, mem_feats=None, holiday=False):
     """Token inputs. obs_hist is (B, N_OBS_HIST, V) observed zone temperatures [K]."""
     b = zobs_n.shape[0]
     diffs = (obs_hist[:, :-1] - obs_hist[:, 1:]) / dtemp_std
     parts = [zobs_n, diffs.permute(0, 2, 1), static.expand(b, -1, -1), zact_prev]
     if pi_int is not None:
         parts.append(pi_int.unsqueeze(-1))
+    if mem_feats is not None:
+        parts.append(mem_feats)
     zin = torch.cat(parts, -1)
     ain = torch.cat([aobs_n, aact_prev], -1)
     hin = torch.cat([hobs_n, hact_prev], -1)
-    gin = torch.cat([gobs, schedule_features(gobs, *sched)], -1)
+    eco = eco_mode(zobs_n) if holiday else None
+    gin = torch.cat([gobs, schedule_features(gobs, *sched, eco=eco)], -1)
     return zin, ain, hin, gin
 
 
@@ -297,6 +337,9 @@ class DPCPolicy:
         #(applied) commands as its previous actions, as in its training rollouts.
         self.filter_in_training = bool(ck.get("filter_in_training", False))
         self.first = True
+        #Lorenzo Giannuzzo: the policy memory is built from the observations
+        #step by step, with the same averages as in the training rollouts.
+        self.ema_t = self.ema_u = self.ema_oat = None
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -323,10 +366,11 @@ class DPCPolicy:
         else:
             self.hist = torch.cat([temp_k.unsqueeze(1), self.hist[:, :-1]], 1)
         zobs_n = (zobs - n.z_mean) / n.z_std
+        mem_feats = self._memory(temp_k, aobs) if self.net.mem else None
         zin, ain, hin, gin = build_inputs(
             zobs_n, (aobs - n.a_mean) / n.a_std, (hobs - n.h_mean) / n.h_std,
             gobs, self.hist, self.static, self.zact_prev, self.aact_prev, self.hact_prev,
-            self.sched, n.dtemp_std, self.pi_int)
+            self.sched, n.dtemp_std, self.pi_int, mem_feats, self.net.holiday)
         zact, aact, hact = self.net(zin, ain, hin, gin, self.rel)
         if self.net.hybrid:
             zact, self.pi_int, u = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi,
@@ -338,6 +382,13 @@ class DPCPolicy:
                                               self.zact_prev, self.aact_prev, self.hact_prev)
         self.first = False
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
+        if self.net.mem:
+            from sbwm.world_model import MEM_U_TAUS
+
+            a_u = torch.tensor([math.exp(-1.0 / t) for t in MEM_U_TAUS] * 2)
+            x_u = torch.cat([zact[..., 1:2].expand(-1, -1, len(MEM_U_TAUS)),
+                             zact[..., 0:1].expand(-1, -1, len(MEM_U_TAUS))], -1)
+            self.ema_u = a_u * self.ema_u + (1 - a_u) * x_u
         out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
         if self.alpha is not None and not self.filter_in_training:
             #Lorenzo Giannuzzo: optional low-pass filter on the continuous commands
@@ -350,6 +401,30 @@ class DPCPolicy:
             self.c_prev = c
             out["continuous_action"] = c
         return out
+
+
+def _policy_memory(self, temp_k: torch.Tensor, aobs: torch.Tensor) -> torch.Tensor:
+    """Update the observation-based memory and return the policy memory inputs."""
+    from sbwm.wm_data import AHU_OAT
+    from sbwm.world_model import MEM_OAT_TAUS, MEM_T_TAUS, MEM_U_TAUS
+
+    oat = aobs[..., AHU_OAT].mean(-1)  # (1,) [K]
+    a_t = torch.tensor([math.exp(-1.0 / t) for t in MEM_T_TAUS])
+    a_o = torch.tensor([math.exp(-1.0 / t) for t in MEM_OAT_TAUS])
+    if self.ema_t is None:
+        self.ema_t = temp_k.unsqueeze(-1).repeat(1, 1, len(MEM_T_TAUS))
+        self.ema_u = -torch.ones(1, self.v, 2 * len(MEM_U_TAUS))
+        self.ema_oat = oat.unsqueeze(-1).repeat(1, len(MEM_OAT_TAUS))
+    else:
+        self.ema_t = a_t * self.ema_t + (1 - a_t) * temp_k.unsqueeze(-1)
+    #Lorenzo Giannuzzo: as in training, the outdoor-air feature compares the
+    #average of the past with the current value, then the average moves on.
+    oat_feat = (self.ema_oat - oat.unsqueeze(-1)) / 10.0
+    self.ema_oat = a_o * self.ema_oat + (1 - a_o) * oat.unsqueeze(-1)
+    return memory_features(torch.cat([self.ema_t, self.ema_u], -1), temp_k, oat_feat)
+
+
+DPCPolicy._memory = _policy_memory
 
 
 def to_env_action(s, zact, aact, hact) -> dict[str, np.ndarray]:

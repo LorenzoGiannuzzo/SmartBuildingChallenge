@@ -26,7 +26,7 @@ from torch.utils.checkpoint import checkpoint as ckpt
 
 from sbwm.critic import VALUE_SCALE, CriticNet, critic_loss, critic_y, lambda_returns, to_sum
 from sbwm.policy import (N_OBS_HIST, PI_WARMUP, PolicyNet, band_excess, build_inputs, filter_actions, hybrid_plant,
-                         hybrid_zone_actions)
+                         hybrid_zone_actions, memory_features)
 from sbwm.train_wm import reward_from
 from sbwm.wm_data import HIST, EpisodePool, Normalizer, list_files, load_dir
 from sbwm.world_model import Rollout, WorldModel
@@ -56,10 +56,18 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
     pi_int = state.get("pi_int") if hybrid else None
     if hybrid and pi_int is None:
         pi_int = torch.zeros(state["zobs"].shape[:2])
+    mem_feats = None
+    if getattr(policy, "mem", False):
+        #Lorenzo Giannuzzo: the policy memory is read from the world-model memory
+        #state (true temperatures one step ahead of the observed ones, which is
+        #negligible for averages of one hour or more).
+        from sbwm.world_model import episode_memory
+
+        mem_feats = memory_features(state["mem"], obs_hist[:, 0], episode_memory(ep)[1][t])
     zin, ain, hin, gin = build_inputs(
         state["zobs"], state["aobs"], state["hobs"], ep.gobs[t], obs_hist, ep.static,
         state["zact_prev"], state["aact_prev"], state["hact_prev"], ep.sched, norm.dtemp_std,
-        pi_int)
+        pi_int, mem_feats, getattr(policy, "holiday", False))
     zact, aact, hact = policy(zin, ain, hin, gin, ro.rel, hard=hard)
     if hybrid:
         zact, pi_int, u = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi,
@@ -122,8 +130,11 @@ def init_policy(policy, sd: dict) -> None:
             continue
         if own[k].shape == v.shape:
             own[k] = v
-        elif k == "enc_zone.0.weight" and own[k].shape[1] == v.shape[1] + 1:
-            own[k] = torch.cat([v, torch.zeros(v.shape[0], 1)], 1)
+        elif k == "enc_zone.0.weight" and own[k].shape[1] > v.shape[1]:
+            #Lorenzo Giannuzzo: extra zone inputs (PI integral, policy memory) are
+            #appended at the end and start with zero weights, so the new policy
+            #begins exactly as the source one.
+            own[k] = torch.cat([v, torch.zeros(v.shape[0], own[k].shape[1] - v.shape[1])], 1)
         elif k.startswith("head_zone.") and v.shape[0] == 5 and own[k].shape[0] == 6:
             #Lorenzo Giannuzzo: a hybrid head gains the derivative output, which
             #keeps its fresh (near zero) initialization.
@@ -290,6 +301,10 @@ def main():
     ap.add_argument("--refresh", type=int, default=100, help="iterations between pool refreshes")
     ap.add_argument("--anchor", default=None, help="policy checkpoint used as trust-region anchor")
     ap.add_argument("--anchor-weight", type=float, default=0.0)
+    ap.add_argument("--policy-mem", action="store_true",
+                    help="give the policy the long memory (needs a world model with memory)")
+    ap.add_argument("--holiday", action="store_true",
+                    help="scheduled days in reduced setpoint mode are seen as weekend days")
     ap.add_argument("--action-filter", type=float, default=None,
                     help="train with the low-pass command filter in the loop (weight of the new command)")
     ap.add_argument("--smooth", type=float, default=0.0,
@@ -355,6 +370,10 @@ def main():
     train = EpisodePool(files, args.pool, rng, args.refresh)
     test = load_dir(Path(args.test))
     policy_args = {"d": args.d, "layers": args.layers}
+    if args.policy_mem:
+        policy_args["mem"] = True
+    if args.holiday:
+        policy_args["holiday"] = True
     if args.hybrid:
         from sbwm.zone_pi import parse_params
 
