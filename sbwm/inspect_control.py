@@ -50,9 +50,9 @@ NAMES = {"pid_water": "PID With Water Reset", "transformer_v6": "Transformer v6 
          "v11_base_f03": "Transformer On World Model v11 With Command Filter 0.3",
          "v11_fit3": "Transformer On World Model v11, Filter In Training",
          "v11_long_fit3": "Transformer On World Model v11, 24 h Horizon, Filter In Training",
-         "v12_base_f03": "Transformer On World Model v12 With Command Filter 0.3",
-         "v12_mem_f03": "Transformer With Memory On World Model v12, Command Filter 0.3",
-         "v12_mem_fit3": "Transformer With Memory On World Model v12, Filter In Training"}
+         "v12_long_fit3": "Transformer On World Model v12, 24 h Horizon, Filter In Training",
+         "v12_mem_long_fit3": "Transformer With Memory On World Model v12, 24 h Horizon",
+         "v12_mem_ft": "Transformer With Memory Fine-Tuned From v11, 24 h Horizon"}
 
 
 def label(policy: str) -> str:
