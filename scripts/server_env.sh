@@ -25,6 +25,8 @@ push_results() {
     local msg="$1"; shift
     git add "$@"
     git commit -m "$msg" || true
-    git pull --rebase origin main
-    git push origin main
+    #Lorenzo Giannuzzo: a failed pull or push must not stop the round; the
+    #commit stays on the server and goes out with the next successful push.
+    git pull --rebase origin main || echo "WARNING: pull failed, results kept on the server"
+    git push origin main || echo "WARNING: push failed, results kept on the server"
 }
