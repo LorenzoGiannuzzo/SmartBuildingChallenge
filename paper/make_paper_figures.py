@@ -1,0 +1,153 @@
+"""Figures of the Round 1 paper, built from the evaluation results in results/.
+
+Usage (from the repository root):
+    python paper/make_paper_figures.py
+"""
+
+from __future__ import annotations
+
+import collections
+import json
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+OUT = Path("paper/figures")
+RES = Path("results/official30_14d.json")
+REC = Path("results/inspect/recordings")
+
+plt.rcParams.update({
+    "font.family": "serif", "font.serif": ["STIXGeneral", "DejaVu Serif"], "mathtext.fontset": "stix",
+    "font.size": 9, "axes.labelsize": 9, "legend.fontsize": 8, "xtick.labelsize": 8, "ytick.labelsize": 8,
+    "axes.formatter.use_locale": False, "pdf.fonttype": 42,
+})
+CLIMATES = {"atlanta": "Atlanta", "denver": "Denver", "fairbanks": "Fairbanks", "phoenix": "Phoenix",
+            "singapore": "Singapore"}
+COLORS = {"atlanta": "#1b9e77", "denver": "#d95f02", "fairbanks": "#3b5bdb", "phoenix": "#e7298a",
+          "singapore": "#66a61e"}
+C_OLD, C_NEW, C_KAGGLE = "#9aa5b1", "#1f4e79", "#c0504d"
+
+
+def legend_top(ax_or_fig, handles=None, labels=None, ncol=2, y=1.0, fig=False):
+    #Lorenzo Giannuzzo: legend centered above the plot, inside a black frame.
+    kw = dict(loc="lower center", ncol=ncol, frameon=True, fancybox=False, edgecolor="black", framealpha=1.0)
+    if fig:
+        leg = ax_or_fig.legend(handles, labels, bbox_to_anchor=(0.5, y), **kw)
+    elif handles is None:
+        leg = ax_or_fig.legend(bbox_to_anchor=(0.5, y), **kw)
+    else:
+        leg = ax_or_fig.legend(handles, labels, bbox_to_anchor=(0.5, y), **kw)
+    leg.get_frame().set_linewidth(0.8)
+    return leg
+
+
+def scores():
+    d = json.loads(RES.read_text())
+    out = collections.defaultdict(dict)
+    for r in d:
+        name = "pid_water" if r["policy"] == "pid_water" else Path(r["weights"]).stem
+        scen = r["scenario"].split("training_scenarios/")[-1]
+        out[name][scen] = abs(r["mean_reward"])
+    return out
+
+
+def fig_progression(s):
+    #Lorenzo Giannuzzo: local 14-day score of each stage of the method next to
+    #its Kaggle public leaderboard score, where one was submitted.
+    stages = [("pid_water", "PID\nBaseline", None),
+              ("abl_A10", "Entity-Token\nPolicy", 0.019),
+              ("v10_base_f03", "+ Memory World\nModel, Filter", 0.018),
+              ("v11_base_f03", "+ Calibrated\nWorld Model", None),
+              ("v11_long_fit3", "+ 24 h Horizon,\nFilter In Training", 0.013)]
+    local = [np.mean(list(s[k].values())) for k, _, _ in stages]
+    x = np.arange(len(stages))
+    fig, ax = plt.subplots(figsize=(5.5, 2.6))
+    w = 0.38
+    b1 = ax.bar(x - w / 2, local, w, color=C_NEW, label="Local Evaluation, 30 Scenarios, 14 Days")
+    kag = [k for _, _, k in stages]
+    b2 = ax.bar(x[[i for i, k in enumerate(kag) if k]] + w / 2, [k for k in kag if k], w, color=C_KAGGLE,
+                label="Kaggle Public Leaderboard")
+    for bars in (b1, b2):
+        for b in bars:
+            ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.0008, f"{b.get_height():.4f}".rstrip("0"),
+                    ha="center", va="bottom", fontsize=7)
+    ax.set_xticks(x, [lab for _, lab, _ in stages])
+    ax.set_ylabel("Mean Absolute Step Reward [-]")
+    ax.set_ylim(0, 0.068)
+    ax.grid(axis="y", lw=0.4, alpha=0.5)
+    ax.set_axisbelow(True)
+    legend_top(ax, ncol=2, y=1.01)
+    fig.tight_layout()
+    fig.savefig(OUT / "progression.pdf", bbox_inches="tight")
+    plt.close(fig)
+    return dict(zip([k for k, _, _ in stages], local))
+
+
+def fig_scenarios(s):
+    a, b = s["v10_base_f03"], s["v11_long_fit3"]
+    fig, ax = plt.subplots(figsize=(3.2, 3.0))
+    for c, name in CLIMATES.items():
+        keys = [k for k in a if f"/{c}_" in k]
+        ax.scatter([a[k] for k in keys], [b[k] for k in keys], s=18, color=COLORS[c], label=name,
+                   edgecolor="black", linewidth=0.3, zorder=3)
+    lim = (0.0015, 0.12)
+    ax.plot(lim, lim, color="black", lw=0.8, ls="--", zorder=2)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    ax.set_xlabel("Memory World Model, Filter [-]")
+    ax.set_ylabel("24 h Horizon, Filter In Training [-]")
+    ax.grid(lw=0.4, alpha=0.5, which="major")
+    ax.set_axisbelow(True)
+    legend_top(ax, ncol=3, y=1.01)
+    fig.tight_layout()
+    fig.savefig(OUT / "scenarios.pdf", bbox_inches="tight")
+    plt.close(fig)
+    return sum(b[k] < a[k] for k in a), len(a)
+
+
+def fig_fairbanks():
+    names = {"v10_base_f03": ("Memory World Model, Filter", C_OLD),
+             "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
+    recs = {k: np.load(REC / f"building_train_1__fairbanks_1__{k}.npz", allow_pickle=True) for k in names}
+    fig, axes = plt.subplots(3, 1, figsize=(5.5, 3.9), sharex=True)
+    d0 = recs["v11_long_fit3"]
+    days = np.arange(len(d0["reward"])) / 288.0
+    axes[0].plot(days, np.nanmean(d0["aobs"][:, :, 14], 1) - 273.15, color="black", lw=1.0)
+    axes[0].set_ylabel("Outdoor Air\nTemperature [°C]")
+    hsp = np.median(d0["hsp"], 1)
+    lines = []
+    for k, (lab, col) in names.items():
+        d = recs[k]
+        cold = np.percentile(d["temp"], 10, axis=1)
+        l, = axes[1].plot(days, cold, color=col, lw=1.0)
+        axes[2].plot(days, d["gas_kw"], color=col, lw=0.9)
+        lines.append((l, f"{lab}, Mean Step Reward {d['reward'].mean():.4f}"))
+    ls, = axes[1].plot(days, hsp, color="black", lw=0.8, ls="--")
+    axes[1].set_ylabel("Coldest Zones\nTemperature [°C]")
+    axes[2].set_ylabel("Natural Gas\nPower [kW]")
+    axes[2].set_xlabel("Time Since Start, Sunday 1 January 2023 [Day]")
+    axes[2].set_xlim(0, days[-1])
+    for ax in axes:
+        ax.grid(lw=0.4, alpha=0.5)
+        ax.set_axisbelow(True)
+    handles = [h for h, _ in lines] + [ls]
+    labels = [t for _, t in lines] + ["Median Heating Setpoint"]
+    fig.tight_layout(rect=(0, 0, 1, 0.86))
+    legend_top(fig, handles, labels, ncol=1, y=0.86, fig=True)
+    fig.savefig(OUT / "fairbanks.pdf", bbox_inches="tight")
+    plt.close(fig)
+    return {k: float(recs[k]["reward"].mean()) for k in names}
+
+
+if __name__ == "__main__":
+    OUT.mkdir(parents=True, exist_ok=True)
+    s = scores()
+    print("progression", fig_progression(s))
+    print("scenarios won", fig_scenarios(s))
+    print("fairbanks", fig_fairbanks())

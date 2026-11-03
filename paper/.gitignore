@@ -1,0 +1,8 @@
+png/
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.zip
+Giannuzzo_*.pdf
