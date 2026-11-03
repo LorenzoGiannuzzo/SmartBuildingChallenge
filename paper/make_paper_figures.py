@@ -62,7 +62,7 @@ def fig_progression(s):
               ("abl_A10", "Entity-Token\nPolicy", 0.019),
               ("v10_base_f03", "+ Memory World\nModel, Filter", 0.018),
               ("v11_base_f03", "+ Calibrated\nWorld Model", None),
-              ("v11_long_fit3", "+ 24 h Horizon,\nFilter In Training", 0.013)]
+              ("v11_long_fit3", "+ 12-24 h Horizon,\nFilter In Training", 0.013)]
     local = [np.mean(list(s[k].values())) for k, _, _ in stages]
     x = np.arange(len(stages))
     fig, ax = plt.subplots(figsize=(4.6, 2.45))
@@ -101,7 +101,7 @@ def fig_scenarios(s):
     ax.set_xlim(lim)
     ax.set_ylim(lim)
     ax.set_xlabel("Memory World Model, Filter [-]")
-    ax.set_ylabel("24 h Horizon, Filter In Training [-]")
+    ax.set_ylabel("12-24 h Horizon, Filter In Training [-]")
     ax.grid(lw=0.4, alpha=0.5, which="major")
     ax.set_axisbelow(True)
     legend_top(ax, ncol=3, y=1.01)
@@ -115,10 +115,10 @@ def fig_examples():
     #Lorenzo Giannuzzo: first week of a subarctic and of a mild winter scenario,
     #same two policies, shared legend above the two columns.
     names = {"v10_base_f03": ("Memory World Model, Filter", C_OLD),
-             "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
+             "v11_long_fit3": ("12-24 h Horizon, Filter In Training", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.75), sharex="col")
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.55), sharex="col")
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
@@ -143,9 +143,9 @@ def fig_examples():
         ticks = np.arange(24, days[-1] + 1, 12)
         axes[2, c].set_xticks(ticks, [f"0\n{names_d[int(h // 24)]}" if h % 24 == 0 else "12\n" for h in ticks],
                               fontsize=6.5)
-    axes[0, 0].set_ylabel("Outdoor Air\nTemperature [°C]")
-    axes[1, 0].set_ylabel("Coldest Zones\nTemperature [°C]")
-    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]")
+    axes[0, 0].set_ylabel("Outdoor Air\nTemperature [°C]", fontsize=8)
+    axes[1, 0].set_ylabel("Zone Temperature,\n10th Percentile [°C]", fontsize=8)
+    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]", fontsize=8)
     for ax in axes.flat:
         ax.grid(lw=0.4, alpha=0.5)
         ax.set_axisbelow(True)

@@ -19,7 +19,7 @@
 \node[anchor=north, font=\footnotesize\bfseries] at (12.35,-0.08) {(c) DPC \& Deployment};
 % ---------- panel A
 \node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
-\node[box, text width=2.9cm] (sim) at (1.75,-2.35) {SBsim Simulator\\ 5-Minute Steps};
+\node[box, text width=2.9cm] (sim) at (1.75,-2.35) {Smart Buildings Simulator\\ 5-Minute Steps};
 \node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_n$};
 \node[box, text width=2.9cm, fill=cblue!12] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4, 12, 24 h, Loss (\ref{eq:wmloss})};
 \draw[arr] (gen) -- (sim);
@@ -65,14 +65,14 @@
 \draw[arr] (bias.south) -- (9.3,-2.55) -| (p1.north);
 % heads
 \node[box, text width=2.75cm, fill=cblue!12] (wmh) at (5.25,-6.25) {\textbf{World Model} $f_\phi$\\ $\Delta T_v$, Sensors, Power\\ 4 Layers, Width 128};
-\node[box, text width=2.75cm, fill=cviolet!12] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, AHU, Plant Commands\\ 3 Layers, Width 64};
+\node[box, text width=2.75cm, fill=cviolet!12] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, Air-Handler \&\\ Hot-Water Commands\\ 3 Layers, Width 64};
 \draw[arr] (blk.south -| wmh) -- (wmh);
 \draw[arr] (blk.south -| pih) -- (pih);
 % ---------- panel C: DPC loop
 \node[box, text width=1.45cm, fill=cviolet!12] (pi) at (11.15,-1.0) {Policy $\pi_\theta$};
 \node[box, text width=1.95cm] (flt) at (13.4,-1.0) {Filter (\ref{eq:filter})\\ $\alpha = 0.3$};
 \node[box, text width=1.95cm, fill=cblue!12] (wm) at (13.4,-2.45) {World Model $f_\phi$\\ Memory (\ref{eq:memory})};
-\node[box, text width=1.45cm] (rew) at (11.15,-2.45) {Reward (\ref{eq:reward})\\ From $\hat{T}$, $\hat{P}$};
+\node[box, text width=1.45cm] (rew) at (11.15,-2.45) {Reward (\ref{eq:dpc})\\ From $\hat{T}$, $\hat{P}$};
 \draw[arr] (pi) -- node[above, font=\tiny] {$u$} (flt);
 \draw[arr] (flt) -- node[right, font=\tiny] {$\tilde{u}$} (wm);
 \draw[arr] (wm) -- (rew);
