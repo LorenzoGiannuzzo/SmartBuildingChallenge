@@ -27,6 +27,7 @@
 \definecolor{cgreen}{HTML}{4E9A63}
 \definecolor{cgrey}{HTML}{BFBFBF}
 \definecolor{cviolet}{HTML}{5B3C99}
+\definecolor{cred}{HTML}{C0392B}
 \usepackage{courier}
 \hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
 
@@ -91,11 +92,11 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
   font=\scriptsize,
   box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=white},
   arr/.style={-{Stealth[length=1.8mm]}, thick, cblue!85!black},
-  grad/.style={-{Stealth[length=1.8mm]}, thick, dashed, corange!90!black},
+  grad/.style={-{Stealth[length=1.8mm]}, thick, dashed, cred!90!black},
   panel/.style={draw=black, rounded corners=4pt, fill=cgrey!22},
   zn/.style={circle, draw, fill=cblue!20, inner sep=0pt, minimum size=4mm},
-  an/.style={rectangle, draw, fill=corange!30, inner sep=0pt, minimum size=4mm},
-  hn/.style={rectangle, draw, fill=cgreen!30, inner sep=0pt, minimum size=4mm},
+  an/.style={rectangle, draw, fill=cred!30, inner sep=0pt, minimum size=4mm},
+  hn/.style={rectangle, draw, fill=cviolet!25, inner sep=0pt, minimum size=4mm},
   gn/.style={rectangle, draw, fill=cgrey!70, inner sep=0pt, minimum size=4mm}]
 % ---------- panels
 \begin{scope}[on background layer]
@@ -103,9 +104,9 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
 \node[panel, minimum width=6.35cm, minimum height=7.0cm, anchor=north west] (PB) at (3.65,0) {};
 \node[panel, minimum width=4.3cm, minimum height=7.0cm, anchor=north west] (PC) at (10.2,0) {};
 \end{scope}
-\node[anchor=north west, font=\footnotesize\bfseries] at (0.1,-0.08) {(a) Data And Rounds};
+\node[anchor=north west, font=\footnotesize\bfseries] at (0.1,-0.08) {(a) Data \& Rounds};
 \node[anchor=north west, font=\footnotesize\bfseries] at (3.75,-0.08) {(b) Entity-Token Transformer};
-\node[anchor=north west, font=\footnotesize\bfseries] at (10.3,-0.08) {(c) DPC And Deployment};
+\node[anchor=north west, font=\footnotesize\bfseries] at (10.3,-0.08) {(c) DPC \& Deployment};
 % ---------- panel A
 \node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
 \node[box, text width=2.9cm] (sim) at (1.75,-2.35) {SBsim Simulator\\ 5-Minute Steps};
@@ -137,7 +138,7 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
 \draw[arr] (6.85,-1.2) -- (7.0,-1.2);
 \draw[arr] (8.3,-1.2) -- (bias.west);
 % layer stack
-\node[box, text width=4.6cm, fill=corange!12] (enc) at (6.4,-2.78) {Type Encoders And Embeddings (\ref{eq:tokens}),\\ One Token Per Entity};
+\node[box, text width=4.6cm, fill=cred!14] (enc) at (6.4,-2.78) {Type Encoders \& Embeddings (\ref{eq:tokens}),\\ One Token Per Entity};
 \node[box, text width=4.4cm, fill=cblue!10] (att) at (6.4,-4.1) {LayerNorm $\rightarrow$ Multi-Head Attention\\ With Relation Bias (\ref{eq:attention})};
 \node[box, text width=4.4cm, fill=cblue!10] (ffn) at (6.4,-4.95) {LayerNorm $\rightarrow$ Feed-Forward,\\ Residuals (\ref{eq:layer})};
 \node[draw, circle, inner sep=0pt, minimum size=3mm, fill=white] (p1) at (9.15,-4.1) {$+$};
@@ -154,11 +155,11 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
 \draw[arr] (bias.south) -- (9.3,-2.55) -| (p1.north);
 % heads
 \node[box, text width=2.75cm, fill=cblue!12] (wmh) at (5.25,-6.25) {\textbf{World Model} $f_\phi$\\ $\Delta T_v$, Sensors, Power\\ 4 Layers, Width 128};
-\node[box, text width=2.75cm, fill=cgreen!15] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, AHU, Plant Commands\\ 3 Layers, Width 64};
+\node[box, text width=2.75cm, fill=cviolet!12] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, AHU, Plant Commands\\ 3 Layers, Width 64};
 \draw[arr] (blk.south -| wmh) -- (wmh);
 \draw[arr] (blk.south -| pih) -- (pih);
 % ---------- panel C: DPC loop
-\node[box, text width=1.45cm, fill=cgreen!15] (pi) at (11.15,-1.0) {Policy $\pi_\theta$};
+\node[box, text width=1.45cm, fill=cviolet!12] (pi) at (11.15,-1.0) {Policy $\pi_\theta$};
 \node[box, text width=1.95cm] (flt) at (13.4,-1.0) {Filter (\ref{eq:filter})\\ $\alpha = 0.3$};
 \node[box, text width=1.95cm, fill=cblue!12] (wm) at (13.4,-2.45) {World Model $f_\phi$\\ Memory (\ref{eq:memory})};
 \node[box, text width=1.45cm] (rew) at (11.15,-2.45) {Reward (\ref{eq:reward})\\ From $\hat{T}$, $\hat{P}$};
@@ -166,10 +167,10 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
 \draw[arr] (flt) -- node[right, font=\tiny] {$\tilde{u}$} (wm);
 \draw[arr] (wm) -- (rew);
 \draw[arr] (wm.north west) -- node[above right, font=\tiny, pos=0.45, inner sep=1pt] {$\hat{s}_{k+1}$} (pi.south east);
-\draw[grad] (10.8,-2.12) -- node[right, font=\tiny, text=corange!90!black] {$\nabla_\theta J$} (10.8,-1.3);
-\node[font=\tiny, align=center, text=corange!90!black] at (12.4,-3.2) {Gradient Damped By $\lambda$ (\ref{eq:damp})};
+\draw[grad] (10.8,-2.12) -- node[right, font=\tiny, text=cred!90!black] {$\nabla_\theta J$} (10.8,-1.3);
+\node[font=\tiny, align=center, text=cred!90!black] at (12.4,-3.2) {Gradient Damped By $\lambda$ (\ref{eq:damp})};
 \node[font=\tiny, align=center] at (12.4,-3.5) {Horizon $H$: 12 $\rightarrow$ 24 h, Objective (\ref{eq:dpc})};
-\node[box, text width=3.6cm, fill=corange!15] (dep) at (12.35,-4.55) {\textbf{Deployment}: $\pi_\theta$ + Filter (\ref{eq:filter})\\ On Unseen Buildings (Kaggle),\\ No Retraining};
+\node[box, text width=3.6cm, fill=cred!14] (dep) at (12.35,-4.55) {\textbf{Deployment}: $\pi_\theta$ + Filter (\ref{eq:filter})\\ On Unseen Buildings (Kaggle),\\ No Retraining};
 \node[box, text width=3.6cm] (onp) at (12.35,-6.0) {New On-Policy Round:\\ $\pi_\theta$ Runs 14-Day Episodes,\\ Half Of Each Batch From $\mathcal{D}_n$};
 \draw[arr] (12.35,-3.7) -- (dep.north);
 \draw[arr] (dep) -- (onp);

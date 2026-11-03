@@ -137,7 +137,7 @@ def fig_examples():
             handles.append(h)
             out[(scen, k)] = round(float(d["reward"].mean()), 4)
         hs, = axes[1, c].plot(days, np.median(d0["hsp"], 1), color="black", lw=0.8, ls="--")
-        axes[2, c].set_xlabel("Hour Of The Day [h] And Day Of The Week")
+        axes[2, c].set_xlabel("Hour Of The Day [h] & Day Of The Week")
         axes[2, c].set_xlim(days[0], days[-1])
         names_d = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         ticks = np.arange(24, days[-1] + 1, 12)
