@@ -32,7 +32,7 @@
 \node[zn] (z3) at (5.3,-1.6) {}; \node[zn] (z4) at (5.9,-1.6) {};
 \node[hn] (h) at (6.45,-0.85) {}; \node[gn] (g) at (6.45,-1.6) {};
 \draw (a1)--(z1) (a1)--(z2) (a2)--(z3) (a2)--(z4);
-\draw[densely dotted] (h)--(a2) (g)--(z4);
+\draw[densely dotted] (a1)--(a2)--(h) (g)--(z4);
 \node[align=center, font=\tiny] at (5.27,-2.08) {Building Graph: Zones, Air\\ Handlers, Plant, Global Token};
 % relation matrix
 \begin{scope}[shift={(7.05,-0.6)}]
