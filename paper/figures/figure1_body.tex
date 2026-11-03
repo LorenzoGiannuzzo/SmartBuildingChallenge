@@ -20,7 +20,7 @@
 % ---------- panel A
 \node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
 \node[box, text width=2.9cm] (sim) at (1.75,-2.35) {Smart Buildings Simulator\\ 5-Minute Steps};
-\node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_n$};
+\node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_m$};
 \node[box, text width=2.9cm, fill=cblue!12] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4, 12, 24 h, Loss (\ref{eq:wmloss})};
 \draw[arr] (gen) -- (sim);
 \draw[arr] (sim) -- (dat);
@@ -81,12 +81,12 @@
 \node[font=\tiny, align=center, text=cred!90!black] at (12.4,-3.2) {Gradient Damped By $\lambda$ (\ref{eq:damp})};
 \node[font=\tiny, align=center] at (12.4,-3.5) {Horizon $H$: 12 $\rightarrow$ 24 h, Objective (\ref{eq:dpc})};
 \node[box, text width=3.6cm, fill=cred!14] (dep) at (12.35,-4.55) {\textbf{Deployment}: $\pi_\theta$ + Filter (\ref{eq:filter})\\ On Unseen Buildings (Kaggle),\\ No Retraining};
-\node[box, text width=3.6cm] (onp) at (12.35,-6.0) {New On-Policy Round:\\ $\pi_\theta$ Runs 14-Day Episodes,\\ Half Of Each Batch From $\mathcal{D}_n$};
+\node[box, text width=3.6cm] (onp) at (12.35,-6.0) {New On-Policy Round:\\ $\pi_\theta$ Runs 14-Day Episodes,\\ Half Of Each Batch From $\mathcal{D}_m$};
 \draw[arr] (12.35,-3.7) -- (dep.north);
 \draw[arr] (dep) -- (onp);
 % ---------- cross-panel arrows
 \draw[arr] (wmt.east) -- (wmh.west);
 \draw[arr] (pih.east) -- (10.1,-6.25) |- (pi.west);
 \draw[arr] (onp.south) -- (12.35,-7.25) -- (-0.25,-7.25) |- (gen.west);
-\node[font=\tiny, anchor=north] at (6.825,-7.27) {Next Round: Fine-Tune $f_\phi$ On $\mathcal{D} \cup \mathcal{D}_n$, Retrain $\pi_\theta$};
+\node[font=\tiny, anchor=north] at (6.825,-7.27) {Next Round: Fine-Tune $f_\phi$ On $\mathcal{D} \cup \mathcal{D}_m$, Retrain $\pi_\theta$};
 \end{tikzpicture}
