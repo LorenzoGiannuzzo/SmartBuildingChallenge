@@ -52,7 +52,11 @@ NAMES = {"pid_water": "PID With Water Reset", "transformer_v6": "Transformer v6 
          "v11_long_fit3": "Transformer On World Model v11, 24 h Horizon, Filter In Training",
          "v12_long_fit3": "Transformer On World Model v12, 24 h Horizon, Filter In Training",
          "v12_mem_long_fit3": "Transformer With Memory On World Model v12, 24 h Horizon",
-         "v12_mem_ft": "Transformer With Memory Fine-Tuned From v11, 24 h Horizon"}
+         "v12_mem_ft": "Transformer With Memory Fine-Tuned From v11, 24 h Horizon",
+         "v13_long_s1": "Transformer On World Model v11, 24 h Horizon, Second Seed",
+         "v13_mem_long": "Transformer With Memory On World Model v11, 24 h Horizon",
+         "v13_mem_2wm": "Transformer With Memory On World Models v11 And v12, 24 h Horizon",
+         "v13_mem_long48": "Transformer With Memory On World Model v11, 48 h Horizon"}
 
 
 def label(policy: str) -> str:

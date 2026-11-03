@@ -340,6 +340,10 @@ class DPCPolicy:
         #Lorenzo Giannuzzo: the policy memory is built from the observations
         #step by step, with the same averages as in the training rollouts.
         self.ema_t = self.ema_u = self.ema_oat = None
+        #Lorenzo Giannuzzo: optional lower bound on the supply-water command
+        #(normalized, -1 minimum and 1 maximum temperature), applied only to the
+        #command sent to the building, so the policy inputs stay as in training.
+        self.water_floor = ck.get("water_floor")
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -389,6 +393,8 @@ class DPCPolicy:
             x_u = torch.cat([zact[..., 1:2].expand(-1, -1, len(MEM_U_TAUS)),
                              zact[..., 0:1].expand(-1, -1, len(MEM_U_TAUS))], -1)
             self.ema_u = a_u * self.ema_u + (1 - a_u) * x_u
+        if self.water_floor is not None:
+            hact = torch.cat([hact[..., :1], hact[..., 1:2].clamp(min=self.water_floor), hact[..., 2:]], -1)
         out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
         if self.alpha is not None and not self.filter_in_training:
             #Lorenzo Giannuzzo: optional low-pass filter on the continuous commands
