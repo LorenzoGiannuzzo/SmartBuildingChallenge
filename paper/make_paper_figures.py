@@ -65,9 +65,9 @@ def fig_progression(s):
               ("v11_long_fit3", "+ 24 h Horizon,\nFilter In Training", 0.013)]
     local = [np.mean(list(s[k].values())) for k, _, _ in stages]
     x = np.arange(len(stages))
-    fig, ax = plt.subplots(figsize=(5.5, 2.6))
+    fig, ax = plt.subplots(figsize=(4.6, 2.75))
     w = 0.38
-    b1 = ax.bar(x - w / 2, local, w, color=C_NEW, label="Local Evaluation, 30 Scenarios, 14 Days")
+    b1 = ax.bar(x - w / 2, local, w, color=C_NEW, label="Local, 30 Scenarios, 14 Days")
     kag = [k for _, _, k in stages]
     b2 = ax.bar(x[[i for i, k in enumerate(kag) if k]] + w / 2, [k for k in kag if k], w, color=C_KAGGLE,
                 label="Kaggle Public Leaderboard")
@@ -89,7 +89,7 @@ def fig_progression(s):
 
 def fig_scenarios(s):
     a, b = s["v10_base_f03"], s["v11_long_fit3"]
-    fig, ax = plt.subplots(figsize=(3.2, 3.0))
+    fig, ax = plt.subplots(figsize=(2.9, 2.9))
     for c, name in CLIMATES.items():
         keys = [k for k in a if f"/{c}_" in k]
         ax.scatter([a[k] for k in keys], [b[k] for k in keys], s=18, color=COLORS[c], label=name,
@@ -118,12 +118,15 @@ def fig_examples():
              "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 4.2), sharex="col")
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.4), sharex="col")
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
         d0 = recs["v11_long_fit3"]
-        days = np.arange(len(d0["reward"])) / 288.0
+        #Lorenzo Giannuzzo: hours since midnight of the start day, so that the
+        #ticks fall on real clock times (the recordings start at 06:00).
+        start_h = float(str(d0["start"]).split()[1].split(":")[0])
+        days = start_h + np.arange(len(d0["reward"])) * 5.0 / 60.0
         axes[0, c].plot(days, np.nanmean(d0["aobs"][:, :, 14], 1) - 273.15, color="black", lw=1.0)
         axes[0, c].set_title(title, fontsize=9)
         handles = []
@@ -134,8 +137,12 @@ def fig_examples():
             handles.append(h)
             out[(scen, k)] = round(float(d["reward"].mean()), 4)
         hs, = axes[1, c].plot(days, np.median(d0["hsp"], 1), color="black", lw=0.8, ls="--")
-        axes[2, c].set_xlabel("Time Since Start [Day]")
-        axes[2, c].set_xlim(0, days[-1])
+        axes[2, c].set_xlabel("Hour Of The Day [h] And Day Of The Week")
+        axes[2, c].set_xlim(days[0], days[-1])
+        names_d = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        ticks = np.arange(24, days[-1] + 1, 12)
+        axes[2, c].set_xticks(ticks, [f"0\n{names_d[int(h // 24)]}" if h % 24 == 0 else "12\n" for h in ticks],
+                              fontsize=6.5)
     axes[0, 0].set_ylabel("Outdoor Air\nTemperature [°C]")
     axes[1, 0].set_ylabel("Coldest Zones\nTemperature [°C]")
     axes[2, 0].set_ylabel("Natural Gas\nPower [kW]")
