@@ -19,10 +19,11 @@
 \usepackage{algpseudocode}
 \usepackage{float}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,fit,calc}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,backgrounds}
 
 \setcitestyle{citesep={,}}
 \usepackage{courier}
+\hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
 
 \title{Entity-Token World Models and Differentiable Predictive Control for Building-Agnostic HVAC Control}
 
@@ -58,13 +59,13 @@ The approach presented here rests on two choices. First, the building is describ
 
 The Smart Buildings Challenge \cite{goldfeder2026smart} is the first benchmark in which a single HVAC policy is evaluated on unseen buildings generated at scale, using the simulator of the Smart Buildings Control Suite \cite{goldfeder2024smart}; earlier benchmarks such as BOPTEST \cite{blum2021boptest} provide detailed but individual test cases. Model Predictive Control (MPC) is the reference for advanced building control \cite{drgona2020mpc}, although its dependence on a model identified for every building limits its scalability. Deep reinforcement learning has been applied to HVAC control since \cite{wei2017drl}, with sample efficiency, safety and transfer to new buildings as its main obstacles \cite{wang2020rl,pinto2022transfer}.
 
-Differentiable control combines the two families. Differentiable MPC \cite{amos2018diffmpc} embeds an optimization problem in a policy, and Gnu-RL \cite{chen2019gnurl} applies it to building HVAC control with a linear model; DPC \cite{drgona2022dpc} instead trains an explicit neural policy offline by differentiating a control objective through a model of the system, and it is the formulation adopted in this work. Learned world models \cite{ha2018world,hafner2020dreamer} allow policies to be trained in imagination, and the exploitation of model errors by the policy, discussed in \cite{janner2019mbpo}, is the main failure mode encountered in the present experiments as well; short-horizon actor-critic methods such as SHAC \cite{xu2022shac} address long horizons with a learned value function, whereas the present work relies on an accurate world model and on gradient damping to differentiate directly through horizons of 24 hours. The entity-token architecture follows the transformer \cite{vaswani2017attention}, and the attention bias depending on the relation between two nodes is inspired by Graphormer \cite{ying2021graphormer}.
+Differentiable control combines the two families. Differentiable MPC \cite{amos2018diffmpc} embeds an optimization problem in a policy, and Gnu-RL \cite{chen2019gnurl} applies it to building HVAC control with a linear model; DPC \cite{drgona2022dpc} instead trains an explicit neural policy offline by differentiating a control objective through a model of the system, and it is the formulation adopted in this work. Learned world models \cite{ha2018world,hafner2020dreamer} allow policies to be trained in imagination, at the risk of exploiting model errors \cite{janner2019mbpo}; short-horizon actor-critic methods such as SHAC \cite{xu2022shac} address long horizons with a learned value function, whereas the present work relies on an accurate world model and on gradient damping to differentiate directly through horizons of 24 hours. The entity-token architecture follows the transformer \cite{vaswani2017attention}, and the attention bias depending on the relation between two nodes is inspired by Graphormer \cite{ying2021graphormer}.
 
 \section{Methods}
 
 \subsection{Problem Setting}
 
-At every 5-minute step $t$, the policy receives the observation $o_t$ of a building with $V$ zones and $K$ air handlers, which contains the temperatures, setpoints and actuator readbacks of every zone, the supply-air, airflow, pressure and outdoor-air measurements of every air handler, the supply-water and pressure measurements of the hot-water system, the comfort-mode flags, the number of occupants and the time, and it returns the action $a_t$, made of the damper and reheat-valve commands $(u^{\mathrm{d}}_v, u^{\mathrm{r}}_v)$ of every zone $v$, the run state, supply-air temperature, static pressure and recirculation commands of every air handler $k$, and the run state, supply-water temperature and differential pressure of the hot-water system. The step reward is
+At every 5-minute step $t$, the policy receives the observation $o_t$ of a building with $V$ zones and $K$ air handlers, which contains the temperatures, setpoints and actuator readbacks of every zone, the supply-air, airflow, pressure and outdoor-air measurements of every air handler, the supply-water and pressure measurements of the hot-water system, the comfort-mode flags, the number of occupants and the time, and it returns the action $a_t$, made of the damper and reheat commands of every zone, the run state, supply-air temperature, static pressure and recirculation of every air handler and the run state, water temperature and pressure of the hot-water system. The step reward is defined as follows:
 \begin{equation}
 r_t = w_p \, R_t - w_e \, \tilde{E}_t - w_c \, \tilde{C}_t ,
 \label{eq:reward}
@@ -77,43 +78,110 @@ The architecture shared by the world model and the policy is outlined in Figure~
 
 \begin{figure}[t]
 \centering
-\begin{tikzpicture}[scale=0.92, transform shape,
-  font=\footnotesize,
-  tok/.style={draw, rounded corners=1pt, minimum width=0.75cm, minimum height=0.5cm, inner sep=1pt},
-  box/.style={draw, thick, rounded corners=2pt, align=center, inner sep=4pt},
-  arr/.style={-{Stealth[length=2mm]}, thick}]
-  \foreach \x/\l in {0.6/z_1, 1.5/z_2, 3.3/z_V} \node[tok, fill=blue!12] at (\x,0) {$\l$};
-  \node at (2.4,0) {$\cdots$};
-  \foreach \x/\l in {4.7/a_1, 6.5/a_K} \node[tok, fill=orange!20] at (\x,0) {$\l$};
-  \node at (5.6,0) {$\cdots$};
-  \node[tok, fill=red!15] at (8.0,0) {$h$};
-  \node[tok, fill=green!15] at (9.0,0) {$g$};
-  \node at (1.95,0.55) {Zone Tokens};
-  \node at (5.6,0.55) {Air-Handler Tokens};
-  \node at (8.5,0.55) {Plant, Global};
-  \node[box, minimum width=9.6cm, minimum height=0.75cm] (tf) at (4.8,-1.25)
-    {Transformer, $L$ Layers, Learned Attention Bias $b_\ell(\mathrm{rel}(i,j))$ Per Head And Relation};
-  \foreach \x in {0.6,1.5,3.3,4.7,6.5,8.0,9.0} \draw[arr] (\x,-0.27) -- (\x,-0.86);
-  \node[box, text width=4.3cm] (wm) at (2.4,-2.85)
-    {\textbf{World Model} $f_\phi$\\ Zone Temperature Change, Sensors,\\ Electric And Gas Power};
-  \node[box, text width=4.3cm] (pi) at (7.2,-2.85)
-    {\textbf{Policy} $\pi_\theta$\\ Damper, Reheat, Air-Handler\\ And Plant Commands};
-  \draw[arr] (2.4,-1.63) -- (wm.north);
-  \draw[arr] (7.2,-1.63) -- (pi.north);
-  \node[box, text width=9.3cm] (dpc) at (4.8,-4.55)
-    {\textbf{DPC Training:} $\pi_\theta$ Acts, $f_\phi$ Predicts, Reward (\ref{eq:reward}) Rebuilt From The Predictions, Gradient Of The Discounted Return Backpropagated To $\theta$ Through The Closed Loop Over $H$ Steps};
-  \draw[arr, dashed] (wm.south) -- (wm.south |- dpc.north);
-  \draw[arr, dashed] (pi.south) -- (pi.south |- dpc.north);
-\end{tikzpicture}
-\caption{Entity-token architecture shared by the world model and the policy (same structure, separate weights), and the DPC training loop that connects them.}
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+  font=\scriptsize,
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=white},
+  arr/.style={-{Stealth[length=1.8mm]}, thick},
+  grad/.style={-{Stealth[length=1.8mm]}, thick, dashed, red!70!black},
+  panel/.style={draw, rounded corners=4pt, fill=gray!6},
+  zn/.style={circle, draw, fill=blue!15, inner sep=0pt, minimum size=4.2mm},
+  an/.style={rectangle, draw, fill=orange!25, inner sep=0pt, minimum size=4.2mm},
+  hn/.style={rectangle, draw, fill=red!15, inner sep=0pt, minimum size=4.2mm},
+  gn/.style={rectangle, draw, fill=green!15, inner sep=0pt, minimum size=4.2mm}]
+% ---------- panels
+\begin{scope}[on background layer]
+\node[panel, minimum width=3.5cm, minimum height=7.0cm, anchor=north west] (PA) at (0,0) {};
+\node[panel, minimum width=6.3cm, minimum height=7.0cm, anchor=north west] (PB) at (3.75,0) {};
+\node[panel, minimum width=4.0cm, minimum height=7.0cm, anchor=north west] (PC) at (10.3,0) {};
+\end{scope}
+\node[anchor=north west, font=\footnotesize\bfseries] at (0.1,-0.08) {(a) Data And Rounds};
+\node[anchor=north west, font=\footnotesize\bfseries] at (3.85,-0.08) {(b) Entity-Token Transformer};
+\node[anchor=north west, font=\footnotesize\bfseries] at (10.4,-0.08) {(c) DPC And Deployment};
+% ---------- panel A
+\node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
+\node[box, text width=2.9cm] (sim) at (1.75,-2.35) {SBsim Simulator\\ 5-Minute Steps};
+\node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_n$};
+\node[box, text width=2.9cm, fill=blue!5] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4, 12, 24 h, Loss (\ref{eq:wmloss})};
+\draw[arr] (gen) -- (sim);
+\draw[arr] (sim) -- (dat);
+\draw[arr] (dat) -- (wmt);
+% ---------- panel B: building graph
+\node[an] (a1) at (4.45,-1.0) {};
+\node[an] (a2) at (5.55,-1.0) {};
+\node[zn] (z1) at (4.1,-1.85) {}; \node[zn] (z2) at (4.75,-1.85) {};
+\node[zn] (z3) at (5.3,-1.85) {}; \node[zn] (z4) at (5.9,-1.85) {};
+\node[hn] (h) at (6.5,-1.0) {}; \node[gn] (g) at (6.5,-1.85) {};
+\draw (a1)--(z1) (a1)--(z2) (a2)--(z3) (a2)--(z4);
+\draw[densely dotted] (h)--(a2) (g)--(z4);
+\node[align=center, font=\tiny] at (5.3,-2.35) {Building Graph: Zones, Air Handlers, Plant, Global};
+% relation matrix
+\begin{scope}[shift={(7.35,-0.75)}]
+\foreach \i in {0,...,5} \foreach \j in {0,...,5} {
+  \pgfmathtruncatemacro{\r}{ifthenelse(\i==\j,9,ifthenelse(\i<4 && \j<4, ifthenelse((\i<2 && \j<2) || (\i>1 && \j>1),0,1), ifthenelse(\j==4 || \i==4, 6, 7)))}
+  \pgfmathsetmacro{\c}{10+8*\r}
+  \fill[blue!\c!white] (\j*0.2,-\i*0.2) rectangle ++(0.2,-0.2);
+}
+\draw (0,0) rectangle (1.2,-1.2);
+\end{scope}
+\node[align=center, font=\tiny] at (7.95,-2.2) {Relation Map $\rho(i,j)$\\ 10 Types};
+\node[box, text width=1.25cm, font=\tiny] (bias) at (9.35,-1.35) {Learned Bias\\ $b^{(\ell,h)}_{\rho(i,j)}$\\ Per Head};
+\draw[arr] (6.85,-1.4) -- (7.3,-1.4);
+\draw[arr] (8.6,-1.35) -- (bias);
+% layer stack
+\node[box, text width=5.6cm, fill=yellow!8] (enc) at (6.85,-2.95) {Type Encoders And Type Embeddings (\ref{eq:tokens}), One Token Per Entity};
+\node[box, text width=5.0cm, fill=blue!6] (att) at (6.6,-3.85) {LayerNorm $\rightarrow$ Multi-Head Attention With Relation Bias (\ref{eq:attention})};
+\node[box, text width=5.0cm, fill=blue!6] (ffn) at (6.6,-4.65) {LayerNorm $\rightarrow$ Feed-Forward (GELU)};
+\node[draw, circle, inner sep=0pt, minimum size=3mm] (p1) at (9.45,-3.85) {$+$};
+\node[draw, circle, inner sep=0pt, minimum size=3mm] (p2) at (9.45,-4.65) {$+$};
+\begin{scope}[on background layer]
+\node[draw, dashed, rounded corners=2pt, fit=(att)(ffn)(p1)(p2), inner sep=4pt] (blk) {};
+\end{scope}
+\node[font=\footnotesize\bfseries, anchor=west] at (blk.north west) [xshift=-0.05cm, yshift=0.0cm] {};
+\node[anchor=north east, font=\footnotesize\bfseries, fill=gray!6, inner sep=1pt] at (blk.north east) {$\times L$ Layers};
+\draw[arr] (enc.south -| att) -- (att);
+\draw[arr] (att) -- (p1); \draw[arr] (ffn) -- (p2);
+\draw[arr] (p1) -- (p2);
+\draw[arr] (att.south) -- (ffn.north);
+\draw[arr] (bias.south) |- ($(att.east)+(0,0.12)$) ;
+% heads
+\node[box, text width=2.75cm, fill=blue!5] (wmh) at (5.35,-5.95) {\textbf{World Model} $f_\phi$\\ $\Delta T_v$, Sensors, Power\\ 4 Layers, Width 128};
+\node[box, text width=2.75cm, fill=green!6] (pih) at (8.45,-5.95) {\textbf{Policy} $\pi_\theta$\\ Zone, AHU, Plant Commands\\ 3 Layers, Width 64};
+\draw[arr] (blk.south -| wmh) -- (wmh);
+\draw[arr] (blk.south -| pih) -- (pih);
+% ---------- panel C: DPC loop
+\node[box, text width=1.35cm, fill=green!6] (pi) at (11.15,-1.05) {Policy $\pi_\theta$};
+\node[box, text width=1.35cm] (flt) at (13.35,-1.05) {Filter (\ref{eq:filter})\\ $\alpha = 0.3$};
+\node[box, text width=1.55cm, fill=blue!5] (wm) at (13.3,-2.55) {World Model $f_\phi$\\ Memory (\ref{eq:memory})};
+\node[box, text width=1.35cm] (rew) at (11.15,-2.55) {Reward (\ref{eq:reward})\\ Rebuilt, $\kappa$};
+\draw[arr] (pi) -- node[above, font=\tiny] {$u$} (flt);
+\draw[arr] (flt) -- node[right, font=\tiny] {$\tilde{u}$} (wm);
+\draw[arr] (wm) -- node[above, font=\tiny] {$\hat{T}, \hat{P}$} (rew);
+\draw[arr] (wm.north west) -- node[right, font=\tiny, pos=0.6] {$\hat{s}_{k+1}$} (pi.south east);
+\draw[grad] (rew.north) -- (pi.south);
+\node[font=\tiny, text=red!70!black, align=left, anchor=west] at (10.38,-1.8) {$\nabla_\theta J$};
+\node[font=\tiny, text=red!70!black, align=center] at (12.25,-3.15) {Gradient Damped By $\lambda$ (\ref{eq:damp})};
+\node[font=\tiny, align=center] at (12.25,-3.45) {Horizon $H$: 12 $\rightarrow$ 24 h, Objective (\ref{eq:dpc})};
+\node[box, text width=3.5cm, fill=yellow!10] (dep) at (12.3,-4.55) {\textbf{Deployment}: $\pi_\theta$ + Filter (\ref{eq:filter})\\ On Unseen Buildings (Kaggle),\\ No Retraining};
+\node[box, text width=3.5cm] (onp) at (12.3,-5.95) {New On-Policy Round:\\ $\pi_\theta$ Runs 14-Day Episodes,\\ Half Of Each Batch From $\mathcal{D}_n$};
+\draw[arr] (rew.south) ++(0,-0.95) -- (dep.north -| rew.south) ;
+\draw[arr] (dep) -- (onp);
+% ---------- cross-panel arrows
+\draw[arr] (wmt.east) -- (wmh.west);
+\draw[arr] (pih.north east) to[out=20, in=200] (pi.west);
+\draw[arr] (onp.south) -- ++(0,-0.35) -| (0.25,-1.05) -- (gen.west);
+\node[font=\tiny, fill=gray!6] at (6.0,-6.92) {Next Round: Fine-Tune $f_\phi$, Retrain $\pi_\theta$};
+\end{tikzpicture}}
+\caption{Overview of the method: (a) data collection on generated buildings and on-policy rounds; (b) entity-token transformer shared by the world model and the policy (same structure, separate weights), with Graphormer-style attention biases given by the relation between two entities; (c) DPC training of the policy through the world model and deployment on unseen buildings.}
 \label{fig:architecture}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:architecture}, a building is represented by $N = V + K + 2$ tokens, one per zone, one per air handler, one for the hot-water system and one global token. The input vector of zone $v$ concatenates its normalized observations, its last three temperature changes, its previous commands and seven static descriptors $g_v$ extracted once from the floor plan, namely the logarithm of the floor area, the exterior-wall fraction, the exterior wall per square root of area, the floor position, the ground-floor and top-floor flags and the number of zones served by the same air handler; air-handler and hot-water tokens concatenate their sensors, including the outdoor air temperature measured by every air handler, with their previous commands, while the global token carries the comfort-mode flags, the number of occupants, the hour and day of the week and, for the policy, the hours to the next scheduled comfort period, the hours left in the current one and a working-day flag. Each token type $c \in \{\mathrm{zone}, \mathrm{ahu}, \mathrm{hws}, \mathrm{glob}\}$ has its own two-layer encoder and a learned type embedding,
+As can be observed in Figure~\ref{fig:architecture}, a building is represented by $N = V + K + 2$ tokens, one per zone, one per air handler, one for the hot-water system and one global token. The input vector of zone $v$ concatenates its normalized observations, its last three temperature changes, its previous commands and seven static descriptors $g_v$ extracted once from the floor plan, namely the logarithm of the floor area, the exterior-wall fraction, the exterior wall per square root of area, the floor position, the ground-floor and top-floor flags and the number of zones served by the same air handler; air-handler and hot-water tokens concatenate their sensors, including the outdoor air temperature measured by every air handler, with their previous commands, while the global token carries the comfort-mode flags, the number of occupants, the hour and day of the week and, for the policy, the hours to the next scheduled comfort period, the hours left in the current one and a working-day flag. Each token type $c \in \{\mathrm{zone}, \mathrm{ahu}, \mathrm{hws}, \mathrm{glob}\}$ has its own two-layer encoder and a learned type embedding:
 \begin{equation}
 x^{(0)}_i = \mathrm{MLP}_c(\mathrm{in}_i) + e_c ,
+\label{eq:tokens}
 \end{equation}
-after which $L$ pre-norm transformer layers \cite{vaswani2017attention} process all tokens jointly. The only structural information enters through the attention logits: each pair of tokens $(i, j)$ belongs to one of ten relations $\rho(i, j)$ (two zones on the same air handler or on different ones, a zone and its own or another air handler in both directions, two air handlers, any token and the hot-water system, any token and the global token, and a token with itself), and every head $h$ of layer $\ell$ adds a learned scalar to the corresponding logit,
+after which $L$ pre-norm transformer layers \cite{vaswani2017attention} process all tokens jointly. The only structural information enters through the attention logits: each pair of tokens $(i, j)$ belongs to one of ten relations $\rho(i, j)$ (two zones on the same air handler or on different ones, a zone and its own or another air handler in both directions, two air handlers, any token and the hot-water system, any token and the global token, and a token with itself), and every head $h$ of layer $\ell$ adds a learned scalar to the corresponding logit:
 \begin{equation}
 A^{(\ell,h)}_{ij} = \mathrm{softmax}_j\!\left( \frac{q^{(\ell,h)}_i \cdot k^{(\ell,h)}_j}{\sqrt{d_h}} + b^{(\ell,h)}_{\rho(i,j)} \right),
 \label{eq:attention}
@@ -123,21 +191,21 @@ in the spirit of Graphormer \cite{ying2021graphormer}, with the biases initializ
 \subsection{World Model}
 \label{sec:wm}
 
-Given the state $s_t$ (the token inputs above), the action $a_t$ and the exogenous inputs $x_t$ read from the episode (weather, setpoints, occupancy, tariffs and carbon intensities), the world model $f_\phi$ predicts the normalized temperature change of every zone, the next actuator readbacks of every zone, the next sensor values of every air handler and of the hot-water system, and the electric and gas power of the building, the latter as sums of non-negative contributions of the individual tokens,
+Given the state $s_t$ (the token inputs above), the action $a_t$ and the exogenous inputs $x_t$ read from the episode (weather, setpoints, occupancy, tariffs and carbon intensities), the world model $f_\phi$ predicts the normalized temperature change of every zone, the next actuator readbacks of every zone, the next sensor values of every air handler and of the hot-water system, and the electric and gas power of the building, the latter as sums of non-negative contributions of the individual tokens:
 \begin{equation}
 \begin{aligned}
 &\hat{T}_{v,t+1} = \hat{T}_{v,t} + \sigma_{\Delta T}\, \Delta\hat{T}_{v,t}, \\
 &\hat{P}^{\mathrm{el}}_t = \textstyle\sum_k \mathrm{softplus}(y^{\mathrm{el}}_k) + \mathrm{softplus}(y^{\mathrm{el}}_{\mathrm{hws}}), \qquad \hat{P}^{\mathrm{gas}}_t = \textstyle\sum_v \mathrm{softplus}(y^{\mathrm{gas}}_v) + \mathrm{softplus}(y^{\mathrm{gas}}_{\mathrm{hws}}) ,
 \end{aligned}
 \end{equation}
-from which the reward (\ref{eq:reward}) is rebuilt exactly. Since walls, slabs and interior mass store heat that is not observed, the air temperature and its last changes cannot distinguish a zone with cold walls after a winter weekend from one with warm walls at the same air temperature; each zone token is therefore augmented by a long memory of exponential averages,
+from which the reward (\ref{eq:reward}) is rebuilt exactly. Since walls, slabs and interior mass store heat that is not observed, the air temperature and its last changes cannot distinguish a zone with cold walls after a winter weekend from one with warm walls at the same air temperature; each zone token is therefore augmented by a long memory of exponential averages:
 \begin{equation}
 m^{(\tau)}_{v,t+1} = e^{-1/\tau}\, m^{(\tau)}_{v,t} + \big(1 - e^{-1/\tau}\big)\, \hat{T}_{v,t+1} ,
 \label{eq:memory}
 \end{equation}
 of its temperature over $\tau = 12$, 72 and 288 steps (1, 6 and 24 hours), of its reheat and damper commands over 6 and 24 hours and of the outdoor air over 6 and 24 hours, which the rollout updates from its own predictions.
 
-The model is trained on closed-loop unrolls of $U \in \{48, 144, 288\}$ steps (4, 12 and 24 hours) in which its own predictions are fed back while the logged actions are replayed, by minimizing
+The model is trained on closed-loop unrolls of $U \in \{48, 144, 288\}$ steps (4, 12 and 24 hours) in which its own predictions are fed back while the logged actions are replayed, by minimizing the following loss:
 \begin{equation}
 \mathcal{L}(\phi) = \frac{1}{U} \sum_{k=1}^{U} \Big( \frac{\sum_v \omega_v (\hat{T}_{v,k} - T_{v,k})^2}{\sigma_{\Delta T}^2 \sum_v \omega_v} + w_R \big(\hat{R}_k - R_k\big)^2 / \sigma_R^2 + w_s\, \mathcal{L}^{\mathrm{sens}}_k + w_P\, \big\| \hat{P}_k - P_k \big\|^2 \Big),
 \label{eq:wmloss}
@@ -146,19 +214,40 @@ where the zone weight $\omega_v = 1 + 3\cdot\mathbb{1}[\text{occupied and within
 
 The training data come from about 140 buildings produced by the official generator, with seeds disjoint from all evaluation sets, under six weather stations (Atlanta, Denver, Fairbanks, Minneapolis, Phoenix and Singapore). The first episodes were collected with an exploration policy switching every few hours between the shipped PID controller, its noisy version, randomly held setpoints and extreme plant states; afterwards, training alternates between the policy and the world model in on-policy rounds, summarized in Algorithm~\ref{alg:train}: in every round the current policy runs one long episode per building, mostly as is and partly with action noise or short idle and randomly held segments, and the world model is fine-tuned with half of each batch drawn from the new episodes, thereby correcting it precisely in the states that the policy visits. Five successive world models are compared in Section~\ref{sec:results}: WM-1 and WM-2 come from the exploration data and the first rounds, WM-3 introduces the memory (\ref{eq:memory}) and the 24-hour unrolls, WM-4 adds a round of the first filtered policy, and WM-5 a round in which a quarter of the segments hold the plant setpoints at random levels.
 
+\begin{algorithm}[!htbp]
+\caption{On-policy rounds of world-model training and DPC training of the policy.}
+\label{alg:train}
+\small
+\begin{algorithmic}[1]
+\State $\mathcal{D} \gets$ exploration episodes on the generated buildings; train $f_\phi$ on $\mathcal{D}$ with (\ref{eq:wmloss})
+\For{round $n = 1, 2, \dots$}
+  \For{iteration $i = 1, \dots, I$} \Comment{DPC, warm-started from the previous policy}
+    \State $H \gets$ curriculum horizon; sample an episode and $B$ start indices $t_0$; $\hat{s}_{t_0} \gets s_{t_0}$
+    \For{$k = 0, \dots, H-1$}
+      \State $\tilde{u} \gets \alpha\, \pi_\theta(\hat{s}_{t_0+k}) + (1-\alpha)\,\tilde{u}$ (\ref{eq:filter}); \quad $\hat{s}_{t_0+k+1} \gets f_\phi(\hat{s}_{t_0+k}, \tilde{u}, x_{t_0+k})$; \quad memory (\ref{eq:memory})
+      \State $\hat{r}_{t_0+k} \gets$ reward rebuilt from $\hat{T}$ and $\hat{P}$ (\ref{eq:dpc}); \quad damp the state gradient (\ref{eq:damp})
+    \EndFor
+    \State $\theta \gets \mathrm{AdamW}(\theta, -\nabla_\theta J)$ with clipped gradient norm, unless the loss is not finite
+  \EndFor
+  \State $\mathcal{D}_n \gets$ one 14-day episode per generated building with $\pi_\theta$, partly with action noise
+  \State fine-tune $f_\phi$ on $\mathcal{D} \cup \mathcal{D}_n$, half of every batch from $\mathcal{D}_n$; \quad $\mathcal{D} \gets \mathcal{D} \cup \mathcal{D}_n$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
 \subsection{Differentiable Predictive Control}
 
-The policy is trained by DPC \cite{drgona2022dpc}, as detailed in the inner loop of Algorithm~\ref{alg:train}. From a batch of true start states $s_{t_0}$ drawn from the collected episodes, the policy acts on the predicted states, the world model predicts the next state with the exogenous inputs of the episode and the reward is rebuilt from the prediction, so that the objective
+The policy is trained by DPC \cite{drgona2022dpc}, as detailed in the inner loop of Algorithm~\ref{alg:train}. From a batch of true start states $s_{t_0}$ drawn from the collected episodes, the policy acts on the predicted states, the world model predicts the next state with the exogenous inputs of the episode and the reward is rebuilt from the prediction, so that the following objective is maximized by backpropagation through the whole closed loop:
 \begin{equation}
 J(\theta) = \mathbb{E}_{s_{t_0}}\Big[\frac{1}{H}\sum_{k=0}^{H-1} \gamma^k \, \hat{r}_{t_0+k}\Big], \qquad \hat{r}_t = \kappa \, w_p \hat{R}_t - w_e \hat{\tilde{E}}_t - w_c \hat{\tilde{C}}_t ,
 \label{eq:dpc}
 \end{equation}
-is maximized by backpropagation through the whole closed loop, where the factor $\kappa > 1$ on the comfort term counteracts the tendency of the policy to trade comfort for energy inside the world model. Three mechanisms make the optimization over horizons of hundreds of steps stable and transferable to the simulator. First, the gradient carried by the predicted state from one step to the previous one is damped without changing its value,
+where the factor $\kappa > 1$ on the comfort term counteracts the tendency of the policy to trade comfort for energy inside the world model. Three mechanisms make the optimization over horizons of hundreds of steps stable and transferable to the simulator. First, the gradient carried by the predicted state from one step to the previous one is damped without changing its value:
 \begin{equation}
 \hat{s}_{k+1} \leftarrow \mathrm{sg}(\hat{s}_{k+1}) + \lambda \big(\hat{s}_{k+1} - \mathrm{sg}(\hat{s}_{k+1})\big),
 \label{eq:damp}
 \end{equation}
-where $\mathrm{sg}$ stops the gradient, so that the credit assigned to an action by a reward $h$ steps later is weighted by $\lambda^h$ and the backpropagation does not explode. Second, since the policy otherwise reacts to world-model errors with fast oscillating commands, which the real plant does not reward, every continuous command is filtered both inside the rollouts and at deployment,
+where $\mathrm{sg}$ stops the gradient, so that the credit assigned to an action by a reward $h$ steps later is weighted by $\lambda^h$ and the backpropagation does not explode. Second, since the policy otherwise reacts to world-model errors with fast oscillating commands, which the real plant does not reward, every continuous command is filtered both inside the rollouts and at deployment:
 \begin{equation}
 \tilde{u}_t = \alpha\, u_t + (1 - \alpha)\, \tilde{u}_{t-1},
 \label{eq:filter}
@@ -203,27 +292,6 @@ Optimizer, learning rate & AdamW, $3\cdot10^{-4}$ \\
 \end{minipage}
 \end{table}
 
-\begin{algorithm}[!htbp]
-\caption{On-policy rounds of world-model training and DPC training of the policy.}
-\label{alg:train}
-\small
-\begin{algorithmic}[1]
-\State $\mathcal{D} \gets$ exploration episodes on the generated buildings; train $f_\phi$ on $\mathcal{D}$ with (\ref{eq:wmloss})
-\For{round $n = 1, 2, \dots$}
-  \For{iteration $i = 1, \dots, I$} \Comment{DPC, warm-started from the previous policy}
-    \State $H \gets$ curriculum horizon; sample an episode and $B$ start indices $t_0$; $\hat{s}_{t_0} \gets s_{t_0}$
-    \For{$k = 0, \dots, H-1$}
-      \State $\tilde{u} \gets \alpha\, \pi_\theta(\hat{s}_{t_0+k}) + (1-\alpha)\,\tilde{u}$ (\ref{eq:filter}); \quad $\hat{s}_{t_0+k+1} \gets f_\phi(\hat{s}_{t_0+k}, \tilde{u}, x_{t_0+k})$; \quad memory (\ref{eq:memory})
-      \State $\hat{r}_{t_0+k} \gets$ reward rebuilt from $\hat{T}$ and $\hat{P}$ (\ref{eq:dpc}); \quad damp the state gradient (\ref{eq:damp})
-    \EndFor
-    \State $\theta \gets \mathrm{AdamW}(\theta, -\nabla_\theta J)$ with clipped gradient norm, unless the loss is not finite
-  \EndFor
-  \State $\mathcal{D}_n \gets$ one 14-day episode per generated building with $\pi_\theta$, partly with action noise
-  \State fine-tune $f_\phi$ on $\mathcal{D} \cup \mathcal{D}_n$, half of every batch from $\mathcal{D}_n$; \quad $\mathcal{D} \gets \mathcal{D} \cup \mathcal{D}_n$
-\EndFor
-\end{algorithmic}
-\end{algorithm}
-
 \section{Results}
 \label{sec:results}
 
@@ -249,7 +317,7 @@ The progression of the method is summarized in Figure~\ref{fig:progression}, and
 \end{minipage}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:progression}, the first entity-token policy trained by DPC already reduces the score of the PID baseline from 0.0591 to 0.0155, that is, by 74\%, and every following stage brings a further reduction, down to 0.0106 for the final policy, which corresponds to 0.013 on the Kaggle public leaderboard, against 0.019 for the first entity-token policy submitted. The largest single gain comes from the 24-hour horizon trained with the command filter in the loop (from 0.0133 to 0.0106).
+As can be observed in Figure~\ref{fig:progression}, the first entity-token policy trained by DPC already reduces the score of the PID baseline by 74\% (from 0.0591 to 0.0155), and every following stage brings a further reduction, down to 0.0106 for the final policy, that is, 0.013 on the Kaggle public leaderboard against 0.019 for the first submission. The largest single gain comes from the 24-hour horizon trained with the command filter in the loop (from 0.0133 to 0.0106).
 
 As can be observed in Figure~\ref{fig:scenarios}, the final policy is better in 23 of the 30 scenarios, with the largest reductions in the cold climates (Fairbanks 1 from 0.089 to 0.068, Fairbanks 8 from 0.046 to 0.027), while in the remaining scenarios the differences are within a few percent. Figure~\ref{fig:examples} shows how this is achieved in two heating scenarios with very different climates, namely the first week of January in Fairbanks 1, when the outdoor air drops below $-35\,^{\circ}$C, and the first week of November in Denver 8, with mild days and nights close to freezing.
 
@@ -264,10 +332,10 @@ As can be observed in Figure~\ref{fig:examples}, both policies switch the plant 
 
 \subsection{World-Model Quality and Policy Quality}
 
-The world models were diagnosed on 45 clean episodes driven by a fixed policy, 30 on the official scenarios and 15 on unseen benchmark buildings, from 1080 start states, both by replaying the logged actions and in closed loop with the policy acting inside the model. Table~\ref{tab:wm} relates these diagnostics to the policies trained on each model.
+Table~\ref{tab:wm} relates the diagnostics of the five world models, computed from 1080 start states of 45 clean episodes (30 official scenarios and 15 unseen buildings) by replaying the logged actions and in closed loop, to the policies trained on each model.
 
 \begin{table}[!htbp]
-\caption{Diagnostics of the five world models (WM-1 to WM-5, Section~\ref{sec:wm}) after 24 hours (temperature mean absolute error and bias, ratio of predicted to true comfort and energy terms) and 14-day score of the policies trained on each model.}
+\caption{World models (Section~\ref{sec:wm}) after 24 hours: temperature error and bias, ratio of predicted to true comfort and energy terms, and 14-day score of the policies trained on them.}
 \label{tab:wm}
 \centering
 \footnotesize
@@ -287,15 +355,15 @@ WM-5 & 0.78 & 0.79 & $-0.01$ & 1.07 & 1.20 & Filter In Training (24 h): 0.0121 \
 \end{tabular}
 \end{table}
 
-As reported in Table~\ref{tab:wm}, the long memory of WM-3 reduced the 24-hour error by about 35\% with respect to WM-2, and the on-policy round of WM-4 removed both the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error of all, yet the same training recipe yields a worse policy on it than on WM-4 (0.0121 against 0.0106), better in only 7 of the 30 scenarios; WM-5 overestimates the comfort term by 7\% and the energy term by 20\%, and its policy spends more energy than needed, especially in the warm climates. This can primarily be attributed to the fact that the DPC gradient follows the predicted reward rather than the predicted temperature, so that a systematic bias on the reward terms steers the policy, whereas a random temperature error largely averages out.
+As reported in Table~\ref{tab:wm}, the long memory of WM-3 reduced the 24-hour error by about 35\% with respect to WM-2, and the on-policy round of WM-4 removed both the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error of all, yet the same recipe yields a worse policy on it than on WM-4 (0.0121 against 0.0106): WM-5 overestimates the comfort term by 7\% and the energy term by 20\%, and its policy spends more energy than needed, especially in warm climates. This can primarily be attributed to the fact that the DPC gradient follows the predicted reward rather than the predicted temperature, so that a systematic bias on the reward terms steers the policy, whereas a random temperature error largely averages out.
 
 \subsection{Long Horizon And Command Filter}
 
-The step from 0.0133 to 0.0106 in Figure~\ref{fig:progression} combines the 24-hour horizon with the command filter applied inside the training rollouts, and the two elements are effective only together and only on an accurate world model. On WM-4, training with the filter but with the 6 to 12-hour horizon yields 0.0182, since the filtered commands respond more slowly and short rollouts do not reveal the benefit of acting earlier, whereas the long horizon lets the policy anticipate occupancy and cold nights while the filter keeps it from exploiting high-frequency errors of the model. On the older WM-2, whose closed-loop error after 24 hours is 1.35 K (Table~\ref{tab:wm}), the same long horizon instead degraded the 7-day score from 0.0195 to 0.0328, since the policy exploited errors accumulated over the horizon.
+The step from 0.0133 to 0.0106 in Figure~\ref{fig:progression} combines the 24-hour horizon with the filter inside the training rollouts, two elements that are effective only together and on an accurate world model. On WM-4, training with the filter but with the 6 to 12-hour horizon yields 0.0182, since short rollouts do not reveal the benefit of acting earlier with slower commands, whereas the long horizon lets the policy anticipate occupancy and cold nights while the filter keeps it from exploiting high-frequency model errors. On WM-2, whose 24-hour error is 1.35 K (Table~\ref{tab:wm}), the long horizon instead degraded the 7-day score from 0.0195 to 0.0328, since the policy exploited the accumulated errors.
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning and without imitation, by representing the building as a set of entities, learning a world model of its physics and differentiating the competition reward through closed-loop rollouts of that model. The resulting policy reduces the score of the shipped PID baseline by 82\% on the official scenarios and reaches 0.013 on the Kaggle public leaderboard. The experiments indicate that the main driver of performance is the world model, in particular its calibration on the reward terms and its accuracy over the planning horizon. The next steps are the measurement of the variance between training seeds, ensembles of world models against the errors of any single model, and planning at deployment, in which the actions of the policy are refined online inside the world model.
+This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning and without imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, thereby reducing the score of the shipped PID baseline by 82\% and reaching 0.013 on the Kaggle public leaderboard. The experiments indicate that the main driver of performance is the world model, in particular its calibration on the reward terms and its accuracy over the planning horizon. The next steps are the measurement of the variance between training seeds, ensembles of world models against the errors of any single model, and planning at deployment, in which the actions of the policy are refined online inside the world model.
 
 \begin{ack}
 This work was carried out within the CREALab project, funded by the Italian Ministry of the Environment and Energy Security (MASE) under the Mission Innovation 2.0 program (project code MI\_FAE\_00326).

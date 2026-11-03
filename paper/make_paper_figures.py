@@ -118,7 +118,7 @@ def fig_examples():
              "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.4), sharex="col")
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 4.0), sharex="col")
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
