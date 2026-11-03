@@ -65,7 +65,7 @@ def fig_progression(s):
               ("v11_long_fit3", "+ 24 h Horizon,\nFilter In Training", 0.013)]
     local = [np.mean(list(s[k].values())) for k, _, _ in stages]
     x = np.arange(len(stages))
-    fig, ax = plt.subplots(figsize=(4.6, 2.75))
+    fig, ax = plt.subplots(figsize=(4.6, 2.45))
     w = 0.38
     b1 = ax.bar(x - w / 2, local, w, color=C_NEW, label="Local, 30 Scenarios, 14 Days")
     kag = [k for _, _, k in stages]
@@ -89,7 +89,7 @@ def fig_progression(s):
 
 def fig_scenarios(s):
     a, b = s["v10_base_f03"], s["v11_long_fit3"]
-    fig, ax = plt.subplots(figsize=(2.9, 2.9))
+    fig, ax = plt.subplots(figsize=(2.75, 2.65))
     for c, name in CLIMATES.items():
         keys = [k for k in a if f"/{c}_" in k]
         ax.scatter([a[k] for k in keys], [b[k] for k in keys], s=18, color=COLORS[c], label=name,
@@ -118,7 +118,7 @@ def fig_examples():
              "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 4.0), sharex="col")
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.75), sharex="col")
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}

@@ -1,0 +1,92 @@
+\begin{tikzpicture}[
+  font=\scriptsize,
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=white},
+  arr/.style={-{Stealth[length=1.8mm]}, thick, cblue!85!black},
+  grad/.style={-{Stealth[length=1.8mm]}, thick, dashed, corange!90!black},
+  panel/.style={draw=cgrey!80!black, rounded corners=4pt, fill=cgrey!22},
+  zn/.style={circle, draw, fill=cblue!20, inner sep=0pt, minimum size=4mm},
+  an/.style={rectangle, draw, fill=corange!30, inner sep=0pt, minimum size=4mm},
+  hn/.style={rectangle, draw, fill=cgreen!30, inner sep=0pt, minimum size=4mm},
+  gn/.style={rectangle, draw, fill=cgrey!70, inner sep=0pt, minimum size=4mm}]
+% ---------- panels
+\begin{scope}[on background layer]
+\node[panel, minimum width=3.5cm, minimum height=7.0cm, anchor=north west] (PA) at (0,0) {};
+\node[panel, minimum width=6.35cm, minimum height=7.0cm, anchor=north west] (PB) at (3.65,0) {};
+\node[panel, minimum width=4.3cm, minimum height=7.0cm, anchor=north west] (PC) at (10.2,0) {};
+\end{scope}
+\node[anchor=north west, font=\footnotesize\bfseries] at (0.1,-0.08) {(a) Data And Rounds};
+\node[anchor=north west, font=\footnotesize\bfseries] at (3.75,-0.08) {(b) Entity-Token Transformer};
+\node[anchor=north west, font=\footnotesize\bfseries] at (10.3,-0.08) {(c) DPC And Deployment};
+% ---------- panel A
+\node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
+\node[box, text width=2.9cm] (sim) at (1.75,-2.35) {SBsim Simulator\\ 5-Minute Steps};
+\node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_n$};
+\node[box, text width=2.9cm, fill=cblue!12] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4, 12, 24 h, Loss (\ref{eq:wmloss})};
+\draw[arr] (gen) -- (sim);
+\draw[arr] (sim) -- (dat);
+\draw[arr] (dat) -- (wmt);
+% ---------- panel B: building graph
+\node[an] (a1) at (4.45,-0.95) {};
+\node[an] (a2) at (5.55,-0.95) {};
+\node[zn] (z1) at (4.1,-1.75) {}; \node[zn] (z2) at (4.75,-1.75) {};
+\node[zn] (z3) at (5.3,-1.75) {}; \node[zn] (z4) at (5.9,-1.75) {};
+\node[hn] (h) at (6.45,-0.95) {}; \node[gn] (g) at (6.45,-1.75) {};
+\draw (a1)--(z1) (a1)--(z2) (a2)--(z3) (a2)--(z4);
+\draw[densely dotted] (h)--(a2) (g)--(z4);
+\node[align=center, font=\tiny] at (5.27,-2.3) {Building Graph: Zones, Air\\ Handlers, Plant, Global Token};
+% relation matrix
+\begin{scope}[shift={(7.05,-0.7)}]
+\foreach \i in {0,...,5} \foreach \j in {0,...,5} {
+  \pgfmathtruncatemacro{\r}{ifthenelse(\i==\j,9,ifthenelse(\i<4 && \j<4, ifthenelse((\i<2 && \j<2) || (\i>1 && \j>1),0,1), ifthenelse(\j==4 || \i==4, 6, 7)))}
+  \pgfmathsetmacro{\c}{10+8*\r}
+  \fill[cblue!\c!white] (\j*0.2,-\i*0.2) rectangle ++(0.2,-0.2);
+}
+\draw (0,0) rectangle (1.2,-1.2);
+\end{scope}
+\node[align=center, font=\tiny] at (7.65,-2.3) {Relation Map $\rho(i,j)$,\\ 10 Types};
+\node[box, text width=1.2cm, font=\tiny] (bias) at (9.3,-1.3) {Learned Bias\\ $b^{(\ell,h)}_{\rho(i,j)}$\\ Per Head};
+\draw[arr] (6.85,-1.3) -- (7.0,-1.3);
+\draw[arr] (8.3,-1.3) -- (bias.west);
+% layer stack
+\node[box, text width=4.6cm, fill=corange!12] (enc) at (6.4,-2.85) {Type Encoders And Embeddings (\ref{eq:tokens}),\\ One Token Per Entity};
+\node[box, text width=4.4cm, fill=cblue!10] (att) at (6.4,-4.1) {LayerNorm $\rightarrow$ Multi-Head Attention\\ With Relation Bias (\ref{eq:attention})};
+\node[box, text width=4.4cm, fill=cblue!10] (ffn) at (6.4,-4.95) {LayerNorm $\rightarrow$ Feed-Forward,\\ Residuals (\ref{eq:layer})};
+\node[draw, circle, inner sep=0pt, minimum size=3mm, fill=white] (p1) at (9.15,-4.1) {$+$};
+\node[draw, circle, inner sep=0pt, minimum size=3mm, fill=white] (p2) at (9.15,-4.95) {$+$};
+\begin{scope}[on background layer]
+\node[draw, dashed, rounded corners=2pt, fit=(att)(ffn)(p1)(p2), inner sep=4pt] (blk) {};
+\end{scope}
+\node[anchor=south west, font=\scriptsize\bfseries] at (blk.north west) {$\times L$ Layers};
+\draw[arr] (enc.south) -- (att.north);
+\draw[arr] (att) -- (p1);
+\draw[arr] (ffn) -- (p2);
+\draw[arr] (p1) -- (p2);
+\draw[arr] (att.south) -- (ffn.north);
+\draw[arr] (bias.south) -- (9.3,-2.55) -| (p1.north);
+% heads
+\node[box, text width=2.75cm, fill=cblue!12] (wmh) at (5.25,-6.25) {\textbf{World Model} $f_\phi$\\ $\Delta T_v$, Sensors, Power\\ 4 Layers, Width 128};
+\node[box, text width=2.75cm, fill=cgreen!15] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, AHU, Plant Commands\\ 3 Layers, Width 64};
+\draw[arr] (blk.south -| wmh) -- (wmh);
+\draw[arr] (blk.south -| pih) -- (pih);
+% ---------- panel C: DPC loop
+\node[box, text width=1.45cm, fill=cgreen!15] (pi) at (11.15,-1.0) {Policy $\pi_\theta$};
+\node[box, text width=1.95cm] (flt) at (13.4,-1.0) {Filter (\ref{eq:filter})\\ $\alpha = 0.3$};
+\node[box, text width=1.95cm, fill=cblue!12] (wm) at (13.4,-2.45) {World Model $f_\phi$\\ Memory (\ref{eq:memory})};
+\node[box, text width=1.45cm] (rew) at (11.15,-2.45) {Reward (\ref{eq:reward})\\ From $\hat{T}$, $\hat{P}$};
+\draw[arr] (pi) -- node[above, font=\tiny] {$u$} (flt);
+\draw[arr] (flt) -- node[right, font=\tiny] {$\tilde{u}$} (wm);
+\draw[arr] (wm) -- (rew);
+\draw[arr] (wm.north west) -- node[above right, font=\tiny, pos=0.45, inner sep=1pt] {$\hat{s}_{k+1}$} (pi.south east);
+\draw[grad] (10.8,-2.12) -- node[right, font=\tiny, text=corange!90!black] {$\nabla_\theta J$} (10.8,-1.3);
+\node[font=\tiny, align=center, text=corange!90!black] at (12.4,-3.2) {Gradient Damped By $\lambda$ (\ref{eq:damp})};
+\node[font=\tiny, align=center] at (12.4,-3.5) {Horizon $H$: 12 $\rightarrow$ 24 h, Objective (\ref{eq:dpc})};
+\node[box, text width=3.6cm, fill=corange!15] (dep) at (12.35,-4.55) {\textbf{Deployment}: $\pi_\theta$ + Filter (\ref{eq:filter})\\ On Unseen Buildings (Kaggle),\\ No Retraining};
+\node[box, text width=3.6cm] (onp) at (12.35,-6.0) {New On-Policy Round:\\ $\pi_\theta$ Runs 14-Day Episodes,\\ Half Of Each Batch From $\mathcal{D}_n$};
+\draw[arr] (12.35,-3.7) -- (dep.north);
+\draw[arr] (dep) -- (onp);
+% ---------- cross-panel arrows
+\draw[arr] (wmt.east) -- (wmh.west);
+\draw[arr] (pih.east) -- (10.1,-6.25) |- (pi.west);
+\draw[arr] (onp.south) -- (12.35,-7.25) -- (-0.25,-7.25) |- (gen.west);
+\node[font=\tiny, anchor=north] at (6.0,-7.27) {Next Round: Fine-Tune $f_\phi$ On $\mathcal{D} \cup \mathcal{D}_n$, Retrain $\pi_\theta$};
+\end{tikzpicture}
