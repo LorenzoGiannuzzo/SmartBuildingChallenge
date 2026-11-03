@@ -111,38 +111,43 @@ def fig_scenarios(s):
     return sum(b[k] < a[k] for k in a), len(a)
 
 
-def fig_fairbanks():
+def fig_examples():
+    #Lorenzo Giannuzzo: first week of a subarctic and of a mild winter scenario,
+    #same two policies, shared legend above the two columns.
     names = {"v10_base_f03": ("Memory World Model, Filter", C_OLD),
              "v11_long_fit3": ("24 h Horizon, Filter In Training", C_NEW)}
-    recs = {k: np.load(REC / f"building_train_1__fairbanks_1__{k}.npz", allow_pickle=True) for k in names}
-    fig, axes = plt.subplots(3, 1, figsize=(5.5, 3.9), sharex=True)
-    d0 = recs["v11_long_fit3"]
-    days = np.arange(len(d0["reward"])) / 288.0
-    axes[0].plot(days, np.nanmean(d0["aobs"][:, :, 14], 1) - 273.15, color="black", lw=1.0)
-    axes[0].set_ylabel("Outdoor Air\nTemperature [°C]")
-    hsp = np.median(d0["hsp"], 1)
-    lines = []
-    for k, (lab, col) in names.items():
-        d = recs[k]
-        cold = np.percentile(d["temp"], 10, axis=1)
-        l, = axes[1].plot(days, cold, color=col, lw=1.0)
-        axes[2].plot(days, d["gas_kw"], color=col, lw=0.9)
-        lines.append((l, f"{lab}, Mean Step Reward {d['reward'].mean():.4f}"))
-    ls, = axes[1].plot(days, hsp, color="black", lw=0.8, ls="--")
-    axes[1].set_ylabel("Coldest Zones\nTemperature [°C]")
-    axes[2].set_ylabel("Natural Gas\nPower [kW]")
-    axes[2].set_xlabel("Time Since Start, Sunday 1 January 2023 [Day]")
-    axes[2].set_xlim(0, days[-1])
-    for ax in axes:
+    cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
+             ("building_train_2__denver_8", "Denver 8, Building 2")]
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 4.2), sharex="col")
+    out = {}
+    for c, (scen, title) in enumerate(cases):
+        recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
+        d0 = recs["v11_long_fit3"]
+        days = np.arange(len(d0["reward"])) / 288.0
+        axes[0, c].plot(days, np.nanmean(d0["aobs"][:, :, 14], 1) - 273.15, color="black", lw=1.0)
+        axes[0, c].set_title(title, fontsize=9)
+        handles = []
+        for k, (lab, col) in names.items():
+            d = recs[k]
+            h, = axes[1, c].plot(days, np.percentile(d["temp"], 10, axis=1), color=col, lw=1.0)
+            axes[2, c].plot(days, d["gas_kw"], color=col, lw=0.9)
+            handles.append(h)
+            out[(scen, k)] = round(float(d["reward"].mean()), 4)
+        hs, = axes[1, c].plot(days, np.median(d0["hsp"], 1), color="black", lw=0.8, ls="--")
+        axes[2, c].set_xlabel("Time Since Start [Day]")
+        axes[2, c].set_xlim(0, days[-1])
+    axes[0, 0].set_ylabel("Outdoor Air\nTemperature [°C]")
+    axes[1, 0].set_ylabel("Coldest Zones\nTemperature [°C]")
+    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]")
+    for ax in axes.flat:
         ax.grid(lw=0.4, alpha=0.5)
         ax.set_axisbelow(True)
-    handles = [h for h, _ in lines] + [ls]
-    labels = [t for _, t in lines] + ["Median Heating Setpoint"]
-    fig.tight_layout(rect=(0, 0, 1, 0.86))
-    legend_top(fig, handles, labels, ncol=1, y=0.86, fig=True)
-    fig.savefig(OUT / "fairbanks.pdf", bbox_inches="tight")
+    labels = [lab for lab, _ in names.values()] + ["Median Heating Setpoint"]
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    legend_top(fig, handles + [hs], labels, ncol=3, y=0.92, fig=True)
+    fig.savefig(OUT / "examples.pdf", bbox_inches="tight")
     plt.close(fig)
-    return {k: float(recs[k]["reward"].mean()) for k in names}
+    return out
 
 
 if __name__ == "__main__":
@@ -150,4 +155,4 @@ if __name__ == "__main__":
     s = scores()
     print("progression", fig_progression(s))
     print("scenarios won", fig_scenarios(s))
-    print("fairbanks", fig_fairbanks())
+    print("examples", fig_examples())
