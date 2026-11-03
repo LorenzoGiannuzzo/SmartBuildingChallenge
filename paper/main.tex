@@ -26,6 +26,7 @@
 \definecolor{corange}{HTML}{E8833A}
 \definecolor{cgreen}{HTML}{4E9A63}
 \definecolor{cgrey}{HTML}{BFBFBF}
+\definecolor{cviolet}{HTML}{5B3C99}
 \usepackage{courier}
 \hypersetup{colorlinks=true,linkcolor=blue!55!black,citecolor=blue!55!black,urlcolor=blue!55!black}
 
@@ -91,7 +92,7 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
   box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=white},
   arr/.style={-{Stealth[length=1.8mm]}, thick, cblue!85!black},
   grad/.style={-{Stealth[length=1.8mm]}, thick, dashed, corange!90!black},
-  panel/.style={draw=cgrey!80!black, rounded corners=4pt, fill=cgrey!22},
+  panel/.style={draw=black, rounded corners=4pt, fill=cgrey!22},
   zn/.style={circle, draw, fill=cblue!20, inner sep=0pt, minimum size=4mm},
   an/.style={rectangle, draw, fill=corange!30, inner sep=0pt, minimum size=4mm},
   hn/.style={rectangle, draw, fill=cgreen!30, inner sep=0pt, minimum size=4mm},
@@ -114,29 +115,29 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $T^{\mathrm{h
 \draw[arr] (sim) -- (dat);
 \draw[arr] (dat) -- (wmt);
 % ---------- panel B: building graph
-\node[an] (a1) at (4.45,-0.95) {};
-\node[an] (a2) at (5.55,-0.95) {};
-\node[zn] (z1) at (4.1,-1.75) {}; \node[zn] (z2) at (4.75,-1.75) {};
-\node[zn] (z3) at (5.3,-1.75) {}; \node[zn] (z4) at (5.9,-1.75) {};
-\node[hn] (h) at (6.45,-0.95) {}; \node[gn] (g) at (6.45,-1.75) {};
+\node[an] (a1) at (4.45,-0.85) {};
+\node[an] (a2) at (5.55,-0.85) {};
+\node[zn] (z1) at (4.1,-1.6) {}; \node[zn] (z2) at (4.75,-1.6) {};
+\node[zn] (z3) at (5.3,-1.6) {}; \node[zn] (z4) at (5.9,-1.6) {};
+\node[hn] (h) at (6.45,-0.85) {}; \node[gn] (g) at (6.45,-1.6) {};
 \draw (a1)--(z1) (a1)--(z2) (a2)--(z3) (a2)--(z4);
 \draw[densely dotted] (h)--(a2) (g)--(z4);
-\node[align=center, font=\tiny] at (5.27,-2.3) {Building Graph: Zones, Air\\ Handlers, Plant, Global Token};
+\node[align=center, font=\tiny] at (5.27,-2.08) {Building Graph: Zones, Air\\ Handlers, Plant, Global Token};
 % relation matrix
-\begin{scope}[shift={(7.05,-0.7)}]
+\begin{scope}[shift={(7.05,-0.6)}]
 \foreach \i in {0,...,5} \foreach \j in {0,...,5} {
   \pgfmathtruncatemacro{\r}{ifthenelse(\i==\j,9,ifthenelse(\i<4 && \j<4, ifthenelse((\i<2 && \j<2) || (\i>1 && \j>1),0,1), ifthenelse(\j==4 || \i==4, 6, 7)))}
   \pgfmathsetmacro{\c}{10+8*\r}
-  \fill[cblue!\c!white] (\j*0.2,-\i*0.2) rectangle ++(0.2,-0.2);
+  \fill[cviolet!\c!white] (\j*0.2,-\i*0.2) rectangle ++(0.2,-0.2);
 }
 \draw (0,0) rectangle (1.2,-1.2);
 \end{scope}
-\node[align=center, font=\tiny] at (7.65,-2.3) {Relation Map $\rho(i,j)$,\\ 10 Types};
-\node[box, text width=1.2cm, font=\tiny] (bias) at (9.3,-1.3) {Learned Bias\\ $b^{(\ell,h)}_{\rho(i,j)}$\\ Per Head};
-\draw[arr] (6.85,-1.3) -- (7.0,-1.3);
-\draw[arr] (8.3,-1.3) -- (bias.west);
+\node[align=center, font=\tiny] at (7.65,-2.08) {Relation Map $\rho(i,j)$,\\ 10 Types};
+\node[box, text width=1.2cm, font=\tiny] (bias) at (9.3,-1.2) {Learned Bias\\ $b^{(\ell,h)}_{\rho}$ Per\\ Layer, Head};
+\draw[arr] (6.85,-1.2) -- (7.0,-1.2);
+\draw[arr] (8.3,-1.2) -- (bias.west);
 % layer stack
-\node[box, text width=4.6cm, fill=corange!12] (enc) at (6.4,-2.85) {Type Encoders And Embeddings (\ref{eq:tokens}),\\ One Token Per Entity};
+\node[box, text width=4.6cm, fill=corange!12] (enc) at (6.4,-2.78) {Type Encoders And Embeddings (\ref{eq:tokens}),\\ One Token Per Entity};
 \node[box, text width=4.4cm, fill=cblue!10] (att) at (6.4,-4.1) {LayerNorm $\rightarrow$ Multi-Head Attention\\ With Relation Bias (\ref{eq:attention})};
 \node[box, text width=4.4cm, fill=cblue!10] (ffn) at (6.4,-4.95) {LayerNorm $\rightarrow$ Feed-Forward,\\ Residuals (\ref{eq:layer})};
 \node[draw, circle, inner sep=0pt, minimum size=3mm, fill=white] (p1) at (9.15,-4.1) {$+$};
