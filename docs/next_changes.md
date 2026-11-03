@@ -25,3 +25,19 @@ implemented together with the next model change.
    start. Addressed by the long horizon (v11_long_fit3).
 4. Residual slow oscillation of gas and reheat (period about one hour),
    much smaller than without the filter.
+
+## Planned for round v14 (decided 3 November, pending the v13 results)
+
+5. 48-hour configuration. If v13_mem_long48 improves the Monday start-up
+   without degrading the rest:
+   - world model trained on unrolls of 4, 12, 24 and 48 hours (lengths
+     48 144 288 576), with gradient damping in the unroll if needed;
+   - DPC horizon 24 to 48 hours on that world model;
+   - start states drawn more often on Friday and Saturday, so that more
+     rollouts contain a weekend and the following Monday;
+   - memory (1, 6, 24 h) in the policy; a 72 h average to test later;
+   - frost-protection floor at deployment (about 10 C) as a safety net,
+     kept even if the policy learns not to let the building freeze.
+   If the 48 h policy on the 24 h world model degrades instead, the
+   world-model accuracy beyond 24 h is the bottleneck and the 48 h world
+   model becomes the first priority.
