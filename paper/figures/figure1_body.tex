@@ -44,7 +44,7 @@
 \draw (0,0) rectangle (1.2,-1.2);
 \end{scope}
 \node[align=center, font=\tiny] at (7.65,-2.08) {Relation Map $\rho(i,j)$,\\ 10 Types};
-\node[box, text width=1.2cm, font=\tiny] (bias) at (9.3,-1.2) {Learned Bias\\ $b^{(\ell,h)}_{\rho}$ Per\\ Layer, Head};
+\node[box, text width=1.0cm, font=\tiny, inner sep=2pt] (bias) at (9.25,-1.2) {Learned Bias\\ $b^{(\ell,h)}_{\rho}$ Per\\ Layer, Head};
 \draw[arr] (6.85,-1.2) -- (7.0,-1.2);
 \draw[arr] (8.3,-1.2) -- (bias.west);
 % layer stack
@@ -62,7 +62,7 @@
 \draw[arr] (ffn) -- (p2);
 \draw[arr] (p1) -- (p2);
 \draw[arr] (att.south) -- (ffn.north);
-\draw[arr] (bias.south) -- (9.3,-2.55) -| (p1.north);
+\draw[arr] (bias.south) -- (9.25,-2.55) -| (p1.north);
 % heads
 \node[box, text width=2.75cm, fill=cblue!12] (wmh) at (5.25,-6.25) {\textbf{World Model} $f_\phi$\\ $\Delta T_v$, Sensors, Power\\ 4 Layers, Width 128};
 \node[box, text width=2.75cm, fill=cviolet!12] (pih) at (8.45,-6.25) {\textbf{Policy} $\pi_\theta$\\ Zone, Air-Handler \&\\ Hot-Water Commands\\ 3 Layers, Width 64};
