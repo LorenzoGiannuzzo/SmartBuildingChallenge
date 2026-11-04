@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from sbwm.physics import PHYS_IN
 from sbwm.world_model import Block, relation_matrix
 
 N_OBS_HIST = 3  # observed zone temperatures kept (current plus two past)
@@ -214,8 +215,13 @@ def filter_actions(alpha: float, zact, aact, hact, zprev, aprev, hprev):
 
 class PolicyNet(nn.Module):
     def __init__(self, d: int = 64, layers: int = 3, heads: int = 4, ff: int = 128,
-                 hybrid: bool = False, pi: dict | None = None, mem: bool = False, holiday: bool = False):
+                 hybrid: bool = False, pi: dict | None = None, mem: bool = False, holiday: bool = False,
+                 phys: bool = False):
         super().__init__()
+        #Lorenzo Giannuzzo: phys adds the physics-based zone features of
+        #sbwm.physics (indoor-outdoor difference, temperature changes, estimated
+        #time constant and recovery rate, free-floating forecast, preheat slack).
+        self.phys = phys
         #Lorenzo Giannuzzo: mem adds the long memory to each zone token; holiday
         #turns scheduled days in reduced setpoint mode into weekend days.
         self.mem = mem
@@ -225,7 +231,8 @@ class PolicyNet(nn.Module):
         #actuator commands.
         self.hybrid = hybrid
         self.pi = {**PI_DEFAULTS, **(pi or {})}
-        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + int(hybrid) + POLICY_MEM_IN * int(mem), d), nn.GELU(),
+        self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + int(hybrid) + POLICY_MEM_IN * int(mem) + PHYS_IN * int(phys), d),
+                                      nn.GELU(),
                                       nn.Linear(d, d))
         self.enc_ahu = nn.Sequential(nn.Linear(AHU_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_hws = nn.Sequential(nn.Linear(HWS_IN, d), nn.GELU(), nn.Linear(d, d))
@@ -277,7 +284,7 @@ class PolicyNet(nn.Module):
 
 
 def build_inputs(zobs_n, aobs_n, hobs_n, gobs, obs_hist, static, zact_prev, aact_prev,
-                 hact_prev, sched, dtemp_std, pi_int=None, mem_feats=None, holiday=False):
+                 hact_prev, sched, dtemp_std, pi_int=None, mem_feats=None, holiday=False, phys_feats=None):
     """Token inputs. obs_hist is (B, N_OBS_HIST, V) observed zone temperatures [K]."""
     b = zobs_n.shape[0]
     diffs = (obs_hist[:, :-1] - obs_hist[:, 1:]) / dtemp_std
@@ -286,6 +293,8 @@ def build_inputs(zobs_n, aobs_n, hobs_n, gobs, obs_hist, static, zact_prev, aact
         parts.append(pi_int.unsqueeze(-1))
     if mem_feats is not None:
         parts.append(mem_feats)
+    if phys_feats is not None:
+        parts.append(phys_feats)
     zin = torch.cat(parts, -1)
     ain = torch.cat([aobs_n, aact_prev], -1)
     hin = torch.cat([hobs_n, hact_prev], -1)
@@ -351,6 +360,7 @@ class DPCPolicy:
         #"off". It acts only on the commands sent to the building.
         self.frost = ck.get("frost_guard")
         self.frost_active = False
+        self.phys_p = None
 
     def _frost_guard(self, temp_k, hod, zact, aact, hact):
         #Lorenzo Giannuzzo: the trigger is a low quantile of the zone
@@ -415,10 +425,11 @@ class DPCPolicy:
             self.hist = torch.cat([temp_k.unsqueeze(1), self.hist[:, :-1]], 1)
         zobs_n = (zobs - n.z_mean) / n.z_std
         mem_feats = self._memory(temp_k, aobs) if self.net.mem else None
+        phys_feats = self._physics(temp_k, zobs, aobs, gobs) if getattr(self.net, "phys", False) else None
         zin, ain, hin, gin = build_inputs(
             zobs_n, (aobs - n.a_mean) / n.a_std, (hobs - n.h_mean) / n.h_std,
             gobs, self.hist, self.static, self.zact_prev, self.aact_prev, self.hact_prev,
-            self.sched, n.dtemp_std, self.pi_int, mem_feats, self.net.holiday)
+            self.sched, n.dtemp_std, self.pi_int, mem_feats, self.net.holiday, phys_feats)
         zact, aact, hact = self.net(zin, ain, hin, gin, self.rel)
         if self.net.hybrid:
             zact, self.pi_int, u = hybrid_zone_actions(zact, zobs_n, self.pi_int, self.net.pi,
@@ -477,6 +488,26 @@ def _policy_memory(self, temp_k: torch.Tensor, aobs: torch.Tensor) -> torch.Tens
 
 
 DPCPolicy._memory = _policy_memory
+
+
+def _policy_physics(self, temp_k: torch.Tensor, zobs: torch.Tensor, aobs: torch.Tensor,
+                    gobs: torch.Tensor) -> torch.Tensor:
+    """Update the physics state with the observation and return its features."""
+    from sbwm.physics import phys_features, phys_init, phys_state, phys_update
+    from sbwm.wm_data import AHU_OAT
+
+    hsp = zobs[..., 1]
+    oat = aobs[..., AHU_OAT].mean(-1)  # (1,) [K]
+    if self.phys_p is None:
+        self.phys_p = phys_init(temp_k, hsp)
+    ahu_on = (self.aact_prev[0, self.zone_ahu.long().clamp(min=0), 0] > 0).float().unsqueeze(0)
+    p = phys_update(self.phys_p, temp_k, oat, hsp, self.zact_prev[..., 1], ahu_on)
+    self.phys_p = phys_state(p)
+    to_start = schedule_features(gobs, *self.sched)[..., 0] * 24.0
+    return phys_features(p, oat, to_start)
+
+
+DPCPolicy._physics = _policy_physics
 
 
 def to_env_action(s, zact, aact, hact) -> dict[str, np.ndarray]:

@@ -50,8 +50,12 @@ def load_models(paths):
     return models, norm
 
 
-def policy_step(policy, ro, state, ep, t, norm, hard=True):
-    """Actions (zone, AHU, HWS) and, for the hybrid policy, the new PI integrals."""
+def policy_step(policy, ro, state, ep, t, norm, hard=True, carry=None):
+    """Actions (zone, AHU, HWS) and, for the hybrid policy, the new PI integrals.
+
+    With ``carry`` (a dict), the policy state to keep for the next step (the
+    physics-feature state) is written into it.
+    """
     obs_hist = state["temp_hist"][:, 1:1 + N_OBS_HIST]
     hybrid = getattr(policy, "hybrid", False)
     pi_int = state.get("pi_int") if hybrid else None
@@ -65,10 +69,15 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
         from sbwm.world_model import episode_memory
 
         mem_feats = memory_features(state["mem"], obs_hist[:, 0], episode_memory(ep)[1][t])
+    phys_feats = None
+    if getattr(policy, "phys", False):
+        phys_feats, p_new = physics_step(state, ep, t, obs_hist[:, 0])
+        if carry is not None:
+            carry.update(p_new)
     zin, ain, hin, gin = build_inputs(
         state["zobs"], state["aobs"], state["hobs"], ep.gobs[t], obs_hist, ep.static,
         state["zact_prev"], state["aact_prev"], state["hact_prev"], ep.sched, norm.dtemp_std,
-        pi_int, mem_feats, getattr(policy, "holiday", False))
+        pi_int, mem_feats, getattr(policy, "holiday", False), phys_feats)
     zact, aact, hact = policy(zin, ain, hin, gin, ro.rel, hard=hard)
     if hybrid:
         zact, pi_int, u = hybrid_zone_actions(zact, state["zobs"], pi_int, policy.pi,
@@ -84,13 +93,34 @@ def policy_step(policy, ro, state, ep, t, norm, hard=True):
     return zact, aact, hact, pi_int
 
 
+def physics_step(state, ep, t, temp_obs):
+    """Physics features at decision t and the updated physics state.
+
+    Inside a rollout the state is carried from step to step; at the first step
+    it is rebuilt from the logged episode up to t, as the policy would have it
+    at deployment. The observed temperatures are the world-model ones.
+    """
+    from sbwm.physics import KEYS, phys_at, phys_features, phys_state, phys_update
+    from sbwm.policy import schedule_features
+    from sbwm.wm_data import AHU_OAT
+
+    p = {k: state[k] for k in KEYS} if KEYS[0] in state else phys_at(ep, t)
+    za = torch.as_tensor(ep.schema.zone_ahu).long()
+    ahu_on = (state["aact_prev"][:, za, 0] > 0).float()
+    oat = ep.aobs[t][:, :, AHU_OAT].mean(-1)
+    p = phys_update(p, temp_obs, oat, ep.zobs[t][:, :, 1], state["zact_prev"][..., 1], ahu_on)
+    to_start = schedule_features(ep.gobs[t], *ep.sched)[..., 0] * 24.0
+    return phys_features(p, oat, to_start), phys_state(p)
+
+
 def _damp(x: torch.Tensor, lam: float) -> torch.Tensor:
     """Same value, gradient through the recurrence scaled by lam."""
     return x.detach() + lam * (x - x.detach())
 
 
 def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, anchor=None, smooth=0.0):
-    zact, aact, hact, pi_int = policy_step(policy, ro, state, ep, t, norm, hard=hard)
+    carry = {}
+    zact, aact, hact, pi_int = policy_step(policy, ro, state, ep, t, norm, hard=hard, carry=carry)
     #Lorenzo Giannuzzo: optional trust region, the squared distance from the
     #actions an anchor policy (the one that collected the latest on-policy
     #data) would take in the same state, which keeps each update inside the
@@ -104,6 +134,7 @@ def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, a
     new_state, out, new_temp = ro.step(state, t, zact, aact, hact)
     if pi_int is not None:
         new_state["pi_int"] = pi_int
+    new_state.update(carry)
     r = reward_from(ep, t, new_temp, out["power"], comfort_scale)
     if smooth > 0:
         #Lorenzo Giannuzzo: training-only penalty on step-to-step changes of the
@@ -324,6 +355,8 @@ def main():
                     help="scheduled days in reduced setpoint mode are seen as weekend days")
     ap.add_argument("--action-filter", type=float, default=None,
                     help="train with the low-pass command filter in the loop (weight of the new command)")
+    ap.add_argument("--phys", action="store_true",
+                    help="physics-based zone features (sbwm.physics) as extra policy inputs")
     ap.add_argument("--weekend-boost", type=float, default=0.0,
                     help="share of the start states drawn on Fridays and Saturdays")
     ap.add_argument("--smooth", type=float, default=0.0,
@@ -391,6 +424,8 @@ def main():
     policy_args = {"d": args.d, "layers": args.layers}
     if args.policy_mem:
         policy_args["mem"] = True
+    if args.phys:
+        policy_args["phys"] = True
     if args.holiday:
         policy_args["holiday"] = True
     if args.hybrid:

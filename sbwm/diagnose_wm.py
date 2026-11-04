@@ -49,12 +49,14 @@ def rollout(model, norm, ep, t0, horizon, policy=None):
         t = t0 + i
         if policy is None:
             z, a, h = ep.zact[t], ep.aact[t], ep.hact[t]
-            pi_int = None
+            pi_int, carry = None, {}
         else:
-            z, a, h, pi_int = policy_step(policy, ro, st, ep, t, norm)
+            carry = {}
+            z, a, h, pi_int = policy_step(policy, ro, st, ep, t, norm, carry=carry)
         st, out, nt = ro.step(st, t, z, a, h)
         if pi_int is not None:
             st["pi_int"] = pi_int
+        st.update(carry)
         temps.append(nt)
         c = comfort_term(ep, t, nt)
         comfort.append(c)

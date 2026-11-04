@@ -41,3 +41,23 @@ implemented together with the next model change.
    If the 48 h policy on the 24 h world model degrades instead, the
    world-model accuracy beyond 24 h is the bottleneck and the 48 h world
    model becomes the first priority.
+
+## Round v15: physics-based zone features (implemented, queued after v14)
+
+- `sbwm/physics.py`: per-zone state updated at every decision, identical in
+  the DPC rollouts and at deployment (the logged prefix of a rollout is
+  replayed with the same recursion, in numpy for speed); 8 extra zone inputs
+  with `--phys`: indoor-outdoor difference, temperature change over 30 min,
+  1 h and 4 h (on the temperature smoothed over 15 min against the sensor
+  noise of 0.3-0.6 K), estimated time constant of the free-floating zone and
+  recovery rate, free-floating temperature expected at the next comfort start
+  and preheat slack (the optimal-start signal).
+- New inputs start with zero weights (`init_policy`), so each policy begins as
+  transformer_v6.
+- `scripts/server_round_v15.sh`: both v14 recipes (2wm 24 h, 48 h on WM v14)
+  with `--phys`, three seeds each, ranked with round v14.
+- `sbwm/make_bundle.py` builds the Kaggle zip (policy.py now imports
+  physics.py, so bundles must include it).
+- Open: training rollouts use noise-free temperatures, deployment noisy ones
+  (smoothed); sensor noise could be injected in training if the 30-min change
+  turns out to be unreliable.
