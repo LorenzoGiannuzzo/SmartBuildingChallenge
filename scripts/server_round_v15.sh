@@ -12,13 +12,23 @@
 #        v15_48_phys_s{0,1,2}   recipe of v14_48 (world model v14, 48 h horizon,
 #                               discount 0.999);
 #      each policy is evaluated on 14 days as soon as its batch ends;
-#   2. ranking of rounds v14 and v15 together, control figures of the two best.
+#   2. ranking of rounds v14 and v15 together; the two best get the light frost
+#      guard (5-8 C, kept in every policy from now on, so that the building
+#      never drops below about 5 C), 14-day evaluation and control figures.
 source "$(dirname "$0")/server_env.sh"
 mkdir -p logs
 
 EVAL() {
     py -m sbwm.eval_policy --scenarios smart_buildings/training_scenarios --policies dpc \
         --weights "$1" --steps 4032 --workers "$WORKERS" --out results/official30_14d.json
+}
+FROST() {
+    # FROST policy.pt on off -> policy_fr<on>.pt, evaluated
+    local w="${1%.pt}_fr$2.pt"
+    if [ -f "$w" ]; then return; fi
+    py -m sbwm.set_frost "$1" "$w" "$2" "$3"
+    EVAL "$w"
+    push_results "14-day official evaluation of $w (frost guard $2-$3 C)" "$w" results/official30_14d.json
 }
 
 DPC_TRAIN=(month_data/episodes)
@@ -76,14 +86,16 @@ fi
 run_batch "${BATCH1[@]}"
 run_batch "${BATCH2[@]}"
 
-# 2. ranking of rounds v14 and v15, control figures of the two best
+# 2. ranking of rounds v14 and v15, light frost guard and control figures of the two best
 ALL=()
 for w in policies/v14_*.pt policies/v15_*.pt; do
     case "$w" in *_fr*) continue ;; esac
     if [ -f "$w" ]; then ALL+=("$w"); fi
 done
 read -r -a BEST <<< "$(py -m sbwm.pick_best results/official30_14d.json 2 "${ALL[@]}")"
+FR=()
+for w in "${BEST[@]}"; do FROST "$w" 5 8; FR+=("${w%.pt}_fr5.pt"); done
 REFS=(pid_water policies/v11_long_fit3.pt policies/v13_mem_2wm.pt)
-py -m sbwm.inspect_control --policies "${REFS[@]}" "${BEST[@]}" --steps 2016 --workers "$WORKERS"
+py -m sbwm.inspect_control --policies "${REFS[@]}" "${BEST[@]}" "${FR[@]}" --steps 2016 --workers "$WORKERS"
 push_results "Control figures of round v15" results/inspect
 echo "round v15 finished, best of v14 and v15: ${BEST[*]}"

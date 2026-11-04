@@ -63,3 +63,7 @@ implemented together with the next model change.
 - Open: training rollouts use noise-free temperatures, deployment noisy ones
   (smoothed); sensor noise could be injected in training if the 30-min change
   turns out to be unreliable.
+- Light frost guard (5-8 C, `sbwm.set_frost src dst 5 8`) kept on every
+  policy from round v15 on, including the Kaggle bundles, so the building never
+  drops below about 5 C; on rounds v11/v13 it costs about 0.0003 on the
+  14-day score (0.0106 to 0.0109).
