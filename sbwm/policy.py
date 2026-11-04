@@ -361,6 +361,12 @@ class DPCPolicy:
         self.frost = ck.get("frost_guard")
         self.frost_active = False
         self.phys_p = None
+        #Lorenzo Giannuzzo: optional action hold at deployment ("action_hold", in
+        #decisions): the commands are recomputed every k steps and repeated in
+        #between, while the policy state (history, memory) still advances.
+        self.hold = int(ck.get("action_hold", 1) or 1)
+        self.held = None
+        self.step_i = 0
 
     def _frost_guard(self, temp_k, hod, zact, aact, hact):
         #Lorenzo Giannuzzo: the trigger is a low quantile of the zone
@@ -440,6 +446,12 @@ class DPCPolicy:
             zact, aact, hact = filter_actions(self.alpha, zact, aact, hact,
                                               self.zact_prev, self.aact_prev, self.hact_prev)
         self.first = False
+        if self.hold > 1:
+            if self.step_i % self.hold == 0 or self.held is None:
+                self.held = (zact, aact, hact)
+            else:
+                zact, aact, hact = self.held
+            self.step_i += 1
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         if self.net.mem:
             from sbwm.world_model import MEM_U_TAUS
