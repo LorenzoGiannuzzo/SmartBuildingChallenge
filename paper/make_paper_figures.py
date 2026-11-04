@@ -113,12 +113,14 @@ def fig_scenarios(s):
 
 def fig_examples():
     #Lorenzo Giannuzzo: first week of a subarctic and of a mild winter scenario,
-    #same two policies, shared legend above the two columns.
-    names = {"v10_base_f03": ("Memory World Model, Filter", C_OLD),
+    #PID baseline and the same two policies, shared legend above the two columns.
+    names = {"pid_water": ("PID With Water Reset", C_KAGGLE),
+             "v10_base_f03": ("Memory World Model, Filter", C_OLD),
              "v11_long_fit3": ("12-24 h Horizon, Filter In Training", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.55), sharex="col")
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.4), sharex="col",
+                             gridspec_kw={"height_ratios": [0.8, 1.35, 0.95]})
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
@@ -143,15 +145,16 @@ def fig_examples():
         ticks = np.arange(24, days[-1] + 1, 12)
         axes[2, c].set_xticks(ticks, [f"0\n{names_d[int(h // 24)]}" if h % 24 == 0 else "12\n" for h in ticks],
                               fontsize=6.5)
-    axes[0, 0].set_ylabel("Outdoor Air\nTemperature [°C]", fontsize=8)
-    axes[1, 0].set_ylabel("Zone Temperature,\n10th Percentile [°C]", fontsize=8)
-    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]", fontsize=8)
+    axes[0, 0].set_ylabel("Outdoor\nAir [°C]", fontsize=7.5)
+    axes[1, 0].set_ylabel("Zone Temperature,\n10th Percentile [°C]", fontsize=7.5)
+    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]", fontsize=7.5)
+    fig.align_ylabels(axes[:, 0])
     for ax in axes.flat:
         ax.grid(lw=0.4, alpha=0.5)
         ax.set_axisbelow(True)
     labels = [lab for lab, _ in names.values()] + ["Median Heating Setpoint"]
     fig.tight_layout(rect=(0, 0, 1, 0.92))
-    legend_top(fig, handles + [hs], labels, ncol=3, y=0.92, fig=True)
+    legend_top(fig, handles + [hs], labels, ncol=4, y=0.92, fig=True)
     fig.savefig(OUT / "examples.pdf", bbox_inches="tight")
     plt.close(fig)
     return out

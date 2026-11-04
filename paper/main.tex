@@ -337,23 +337,23 @@ The progression of the method is summarized in Figure~\ref{fig:progression} and 
 
 As can be observed in Figure~\ref{fig:progression}, the first entity-token policy trained by DPC already reduces the score of the PID baseline by 74\% (from 0.0591 to 0.0155), and every following stage reduces it further, down to 0.0106 ($-82\%$) for the final policy, which scores 0.013 on Kaggle against 0.019 for the first entity-token policy.
 
-Indeed, Figure~\ref{fig:scenarios} shows that the final policy is better than the filtered policy trained on WM-3 in 23 of the 30 scenarios, with the largest reductions in the cold climates (Fairbanks 1 from 0.089 to 0.068, Fairbanks 8 from 0.046 to 0.027). Figure~\ref{fig:examples} compares the same two policies in two heating scenarios with very different climates, Fairbanks 1 in January (outdoor air below $-35\,^{\circ}$C) and Denver 8 in November.
+Indeed, Figure~\ref{fig:scenarios} shows that the final policy is better than the filtered policy trained on WM-3 in 23 of the 30 scenarios, with the largest reductions in the cold climates (Fairbanks 1 from 0.089 to 0.068, Fairbanks 8 from 0.046 to 0.027). Figure~\ref{fig:examples} compares the same two policies with the PID baseline in two heating scenarios with very different climates, Fairbanks 1 in January (outdoor air below $-35\,^{\circ}$C) and Denver 8 in November.
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=\linewidth]{figures/examples.pdf}
-\caption{First week of Fairbanks 1 (building 1, from 1 January) and Denver 8 (building 2, from 5 November): outdoor air, 10th percentile of the zone temperatures with the median heating setpoint (dashed) and gas power, for the filtered policy on WM-3 and the final policy.}
+\caption{First week of Fairbanks 1 (building 1, from 1 January) and Denver 8 (building 2, from 5 November): outdoor air, 10th percentile of the zone temperatures with the median heating setpoint (dashed) and gas power, for the PID baseline, the filtered policy on WM-3 and the final policy.}
 \label{fig:examples}
 \end{figure}
 
-As shown, both policies switch the plant off at night and over the weekend and differ in the heat delivered during occupancy: in Fairbanks 1 the final policy heats more in the second half of each working day, keeping the coldest zones closer to the setpoint with 11\% more gas (first-week score from 0.0650 to 0.0548), and in Denver 8 its coldest zones reach the setpoint sooner after the morning start (from 0.0174 to 0.0121). Over the 30 scenarios, the comfort term is more than halved (from 0.0065 to 0.0026), while energy and carbon grow slightly (from 0.0074 to 0.0080).
+As shown, the PID baseline keeps heating at night and over the weekend, yet, following the zone average of each air handler, it leaves the coldest zones below the setpoint for most of the occupancy (first-week score 0.2961 with 95.8~MWh of gas, against 0.0548 with 22.0~MWh for the final policy) and in Denver 8 also overheats part of the zones (0.0461 against 0.0121). Both learned policies, instead, switch the plant off at night and over the weekend and differ in the heat delivered during occupancy: in Fairbanks 1 the final policy heats more in the second half of each working day, keeping the coldest zones closer to the setpoint with 11\% more gas (first-week score from 0.0650 to 0.0548), and in Denver 8 its coldest zones reach the setpoint sooner after the morning start (from 0.0174 to 0.0121). Over the 30 scenarios, the comfort term is more than halved (from 0.0065 to 0.0026), while energy and carbon grow slightly (from 0.0074 to 0.0080).
 
 \subsection{World-Model Quality and Policy Quality}
 
-Table~\ref{tab:wm} relates the diagnostics of the five world models, from 1080 start states of 45 noise-free episodes on held-out buildings, to the policies trained on them.
+Table~\ref{tab:wm} relates the diagnostics of the five world models (1080 start states of 45 noise-free episodes on held-out buildings) to their policies.
 
 \begin{table}[H]
-\caption{World models (Section~\ref{sec:wm}) over 24-hour rollouts, replaying the logged actions (Replay) or with the policy acting (Closed-Loop): temperature Mean Absolute Error (MAE), bias (predicted minus true), predicted to true comfort and energy, and 14-day score of the policies (WM-2: 7 days only, Section~\ref{sec:horizon}).}
+\caption{World models (Section~\ref{sec:wm}) over 24-hour rollouts, with logged actions (Replay) or with the policy acting (Closed-Loop): temperature Mean Absolute Error (MAE), bias (predicted minus true), predicted to true comfort and energy, and 14-day policy score (WM-2: 7 days, Section~\ref{sec:horizon}).}
 \label{tab:wm}
 \centering
 \footnotesize
@@ -373,18 +373,18 @@ WM-5 & 0.78 & 0.79 & $-0.01$ & 1.07 & 1.20 & Filter In Training (12--24 h): 0.01
 \end{tabular}
 \end{table}
 
-The memory and the 24-hour unrolls of WM-3 reduce the closed-loop 24-hour error by about 35\% with respect to WM-2, and the round of WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error of all, yet the same DPC settings yield a worse policy on it than on WM-4 (0.0121 against 0.0106): WM-5 overestimates the comfort term by 7\%, a bias further amplified by $\kappa$, and its policy spends more energy than needed, especially in warm climates. This can primarily be attributed to the DPC gradient, which follows the predicted reward, so that a systematic bias on the reward steers the policy, whereas random errors average out.
+The memory and 24-hour unrolls of WM-3 cut the closed-loop error by about 35\% with respect to WM-2, and WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error, yet it yields a worse policy than WM-4 (0.0121 against 0.0106), since it overestimates the comfort term by 7\%, a bias amplified by $\kappa$, so that its policy overspends energy, especially in warm climates. This can primarily be attributed to the DPC gradient, which follows the predicted reward, so that a systematic reward bias steers the policy while random errors average out.
 
 \subsection{Long Horizon and Command Filter}
 \label{sec:horizon}
 
-The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) combines the 12 to 24-hour horizon with the filter inside the training rollouts, effective in combination and only on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts do not reveal the benefit of acting earlier with slower commands. On WM-2 (24-hour error of 1.35 K, Table~\ref{tab:wm}) the long horizon instead degraded the 7-day score from 0.0195 to 0.0328, the policy exploiting the accumulated errors.
+The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) requires both the 12 to 24-hour horizon and the filter inside the training rollouts, on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts do not reveal the benefit of acting earlier with slower commands. On the less accurate WM-2 (1.35 K, Table~\ref{tab:wm}) the long horizon instead degraded the 7-day score (from 0.0195 to 0.0328), the policy exploiting the accumulated errors.
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning or imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 82\% and reaches 0.013 on Kaggle, with the calibration and accuracy of the world model as the main drivers of performance. The results are, however, sensitive to the training run, since a second seed of the final recipe, with a slightly larger pool of start states, scores 0.0146 with an almost identical predicted return; policies are therefore selected in the simulator, and future work will reduce this variance through ensembles of world models, whose first test (WM-4 and WM-5 alternated) already matches the final policy (0.0107), and through planning at deployment time.
+This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning or imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 82\% and reaches 0.013 on Kaggle, with the calibration and accuracy of the world model as the main drivers of performance. The results are, however, sensitive to the training run (a second seed of the final recipe, with a slightly larger start-state pool, scores 0.0146 with an almost identical predicted return), so policies are selected in the simulator; future work will reduce this variance through ensembles of world models, whose first test (WM-4 and WM-5 alternated) already matches the final policy (0.0107), and through planning at deployment time.
 
-\paragraph{Acknowledgments.} This work was carried out within the CREALab project, funded by the Italian Ministry of the Environment and Energy Security (MASE) under the Mission Innovation 2.0 program (project code MI\_FAE\_00326).
+\paragraph{Acknowledgments.} This work was carried out within the CREALab project (Italian Ministry of the Environment and Energy Security, MASE, Mission Innovation 2.0, MI\_FAE\_00326).
 
 \clearpage
 \renewcommand{\bibfont}{\small}
