@@ -346,11 +346,11 @@ Indeed, Figure~\ref{fig:scenarios} shows that the final policy is better than th
 \label{fig:examples}
 \end{figure}
 
-As shown, both policies switch the plant off at night and over the weekend, and they differ in the heat delivered during occupancy: in Fairbanks 1 the final policy heats more in the second half of each working day, keeping the coldest zones closer to the setpoint with 11\% more gas (first-week score from 0.0650 to 0.0548), and in Denver 8 its coldest zones reach the setpoint sooner after the morning start (from 0.0174 to 0.0121). With respect to the same policy, the comfort term over the 30 scenarios is more than halved (from 0.0065 to 0.0026), while energy and carbon grow slightly (from 0.0074 to 0.0080).
+As shown, both policies switch the plant off at night and over the weekend and differ in the heat delivered during occupancy: in Fairbanks 1 the final policy heats more in the second half of each working day, keeping the coldest zones closer to the setpoint with 11\% more gas (first-week score from 0.0650 to 0.0548), and in Denver 8 its coldest zones reach the setpoint sooner after the morning start (from 0.0174 to 0.0121). Over the 30 scenarios, the comfort term is more than halved (from 0.0065 to 0.0026), while energy and carbon grow slightly (from 0.0074 to 0.0080).
 
 \subsection{World-Model Quality and Policy Quality}
 
-Table~\ref{tab:wm} relates the diagnostics of the five world models, computed from 1080 start states of 45 episodes without action noise on held-out buildings (the 30 official scenarios and 15 benchmark buildings), to the policies trained on each model.
+Table~\ref{tab:wm} relates the diagnostics of the five world models, from 1080 start states of 45 noise-free episodes on held-out buildings, to the policies trained on them.
 
 \begin{table}[H]
 \caption{World models (Section~\ref{sec:wm}) over 24-hour rollouts, replaying the logged actions (Replay) or with the policy acting (Closed-Loop): temperature Mean Absolute Error (MAE), bias (predicted minus true), predicted to true comfort and energy, and 14-day score of the policies (WM-2: 7 days only, Section~\ref{sec:horizon}).}
@@ -373,16 +373,16 @@ WM-5 & 0.78 & 0.79 & $-0.01$ & 1.07 & 1.20 & Filter In Training (12--24 h): 0.01
 \end{tabular}
 \end{table}
 
-The memory and the 24-hour unrolls of WM-3 reduce the closed-loop 24-hour error by about 35\% with respect to WM-2, and the round of WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error of all, yet the same DPC settings yield a worse policy on it than on WM-4 (0.0121 against 0.0106): WM-5 overestimates the comfort term by 7\%, a bias further amplified by $\kappa$, and its policy spends more energy than needed, especially in warm climates. This can primarily be attributed to the DPC gradient, which follows the predicted reward, so that a systematic bias on the reward terms steers the policy, whereas random temperature errors largely average out.
+The memory and the 24-hour unrolls of WM-3 reduce the closed-loop 24-hour error by about 35\% with respect to WM-2, and the round of WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error of all, yet the same DPC settings yield a worse policy on it than on WM-4 (0.0121 against 0.0106): WM-5 overestimates the comfort term by 7\%, a bias further amplified by $\kappa$, and its policy spends more energy than needed, especially in warm climates. This can primarily be attributed to the DPC gradient, which follows the predicted reward, so that a systematic bias on the reward steers the policy, whereas random errors average out.
 
 \subsection{Long Horizon and Command Filter}
 \label{sec:horizon}
 
-The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) combines the 12 to 24-hour horizon with the filter inside the training rollouts, effective in combination and only on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts do not reveal the benefit of acting earlier with slower commands. On WM-2, whose 24-hour error is 1.35 K (Table~\ref{tab:wm}), the long horizon instead degraded the 7-day score from 0.0195 to 0.0328, since the policy exploited the accumulated errors.
+The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) combines the 12 to 24-hour horizon with the filter inside the training rollouts, effective in combination and only on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts do not reveal the benefit of acting earlier with slower commands. On WM-2 (24-hour error of 1.35 K, Table~\ref{tab:wm}) the long horizon instead degraded the 7-day score from 0.0195 to 0.0328, the policy exploiting the accumulated errors.
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning and without imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 82\% and reaches 0.013 on the Kaggle public leaderboard. The main driver of performance is the calibration and accuracy of the world model, whereas future work will address the variance across training seeds, ensembles of world models and planning at deployment time.
+This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning or imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 82\% and reaches 0.013 on Kaggle, with the calibration and accuracy of the world model as the main drivers of performance. The results are, however, sensitive to the training run, since a second seed of the final recipe, with a slightly larger pool of start states, scores 0.0146 with an almost identical predicted return; policies are therefore selected in the simulator, and future work will reduce this variance through ensembles of world models, whose first test (WM-4 and WM-5 alternated) already matches the final policy (0.0107), and through planning at deployment time.
 
 \paragraph{Acknowledgments.} This work was carried out within the CREALab project, funded by the Italian Ministry of the Environment and Energy Security (MASE) under the Mission Innovation 2.0 program (project code MI\_FAE\_00326).
 

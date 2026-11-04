@@ -344,6 +344,50 @@ class DPCPolicy:
         #(normalized, -1 minimum and 1 maximum temperature), applied only to the
         #command sent to the building, so the policy inputs stay as in training.
         self.water_floor = ck.get("water_floor")
+        #Lorenzo Giannuzzo: optional frost guard at deployment ("frost_guard",
+        #[on, off] in degrees Celsius): when the coldest zone drops below "on",
+        #the hot-water loop runs, the air handlers recirculate, and the zones
+        #below "off" open their reheat valves, until every zone is back above
+        #"off". It acts only on the commands sent to the building.
+        self.frost = ck.get("frost_guard")
+        self.frost_active = False
+
+    def _frost_guard(self, temp_k, hod, zact, aact, hact):
+        #Lorenzo Giannuzzo: the trigger is a low quantile of the zone
+        #temperatures, not the minimum, since a few zones of some buildings stay
+        #cold even when occupied and would keep the guard on all week; the guard
+        #acts only outside the comfort hours (nights, weekends), where the policy
+        #may let the building cool down, and leaves occupied hours to the policy.
+        on, off = self.frost[0] + 273.15, self.frost[1] + 273.15
+        q = self.frost[2] if len(self.frost) > 2 else 0.25
+        two_pi = 2 * math.pi
+        hour = (math.atan2(float(hod[0, 0]), float(hod[0, 1])) % two_pi) * 24.0 / two_pi
+        day = math.floor((math.atan2(float(hod[0, 2]), float(hod[0, 3])) % two_pi) * 7.0 / two_pi + 1e-4)
+        occupied = day < 5 and self.sched[0] <= hour < self.sched[1]
+        tq = float(torch.quantile(temp_k[0], q))
+        if occupied:
+            self.frost_active = False
+        elif tq < on:
+            self.frost_active = True
+        elif tq > off:
+            self.frost_active = False
+        if not self.frost_active:
+            return zact, aact, hact
+        cold = temp_k[0] < off  # (V,)
+        z = zact[0].clone()
+        z[:, 0] = torch.where(cold, z[:, 0].clamp(min=0.0), z[:, 0])  # damper at least half open
+        z[:, 1] = torch.where(cold, torch.ones_like(z[:, 1]), z[:, 1])  # reheat valve fully open
+        #Lorenzo Giannuzzo: the air handlers serving a cold zone heat as the PID
+        #baseline does in heating mode: running, warm supply air, recirculation.
+        served = torch.zeros(self.s.num_ahus, dtype=torch.bool)
+        served[self.zone_ahu[cold].long().clamp(min=0)] = True
+        a = aact[0].clone()
+        a[:, 0] = torch.where(served, torch.ones_like(a[:, 0]), a[:, 0])
+        a[:, 1] = torch.where(served, a[:, 1].clamp(min=0.5), a[:, 1])
+        a[:, 2] = torch.where(served, a[:, 2].clamp(min=0.0), a[:, 2])
+        a[:, 3] = torch.where(served, torch.ones_like(a[:, 3]), a[:, 3])
+        h = torch.ones_like(hact[0])  # hot-water loop running, hottest water, full pressure
+        return z.unsqueeze(0), a.unsqueeze(0), h.unsqueeze(0)
 
     def _take(self, obs, idx):
         idx = np.asarray(idx)
@@ -395,6 +439,8 @@ class DPCPolicy:
             self.ema_u = a_u * self.ema_u + (1 - a_u) * x_u
         if self.water_floor is not None:
             hact = torch.cat([hact[..., :1], hact[..., 1:2].clamp(min=self.water_floor), hact[..., 2:]], -1)
+        if self.frost is not None:
+            zact, aact, hact = self._frost_guard(temp_k, hod, zact, aact, hact)
         out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
         if self.alpha is not None and not self.filter_in_training:
             #Lorenzo Giannuzzo: optional low-pass filter on the continuous commands

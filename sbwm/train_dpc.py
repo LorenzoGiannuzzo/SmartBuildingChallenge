@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import time
 from pathlib import Path
 
@@ -114,6 +115,22 @@ def _closed_loop_step(policy, ro, ep, norm, hard, t, state, comfort_scale=1.0, a
         dh = ((hact[:, 1:] - state["hact_prev"][:, 1:]) ** 2).mean(1)
         r = r - smooth * (dz + da + dh)
     return new_state, r, dev
+
+
+def sample_starts(ep, rng, lo: int, hi: int, n: int, weekend_boost: float = 0.0) -> torch.Tensor:
+    """Start indices in [lo, hi); a share ``weekend_boost`` falls on Fridays and Saturdays."""
+    t0 = rng.integers(lo, hi, n)
+    if weekend_boost > 0:
+        #Lorenzo Giannuzzo: rollouts starting on Friday or Saturday contain a
+        #weekend and, with a 48 h horizon, the following Monday start-up,
+        #which uniform sampling covers only in a small share of the batch.
+        g = ep.gobs[lo:hi]
+        day = torch.floor(torch.remainder(torch.atan2(g[:, 5], g[:, 6]), 2 * math.pi) * 7.0 / (2 * math.pi) + 1e-4)
+        cand = np.nonzero(((day == 4) | (day == 5)).numpy())[0] + lo
+        if len(cand):
+            pick = rng.random(n) < weekend_boost
+            t0[pick] = rng.choice(cand, int(pick.sum()))
+    return torch.as_tensor(t0)
 
 
 def init_policy(policy, sd: dict) -> None:
@@ -307,6 +324,8 @@ def main():
                     help="scheduled days in reduced setpoint mode are seen as weekend days")
     ap.add_argument("--action-filter", type=float, default=None,
                     help="train with the low-pass command filter in the loop (weight of the new command)")
+    ap.add_argument("--weekend-boost", type=float, default=0.0,
+                    help="share of the start states drawn on Fridays and Saturdays")
     ap.add_argument("--smooth", type=float, default=0.0,
                     help="weight of the penalty on step-to-step changes of the continuous commands")
     ap.add_argument("--exclude-buildings", nargs="*", default=[],
@@ -466,7 +485,7 @@ def main():
         train.maybe_refresh()
         ep = train.sample()
         model = models[rng.integers(len(models))]
-        t0 = torch.as_tensor(rng.integers(HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch))
+        t0 = sample_starts(ep, rng, HIST + 2 + PI_WARMUP, ep.length - length - 2, args.batch, args.weekend_boost)
         res_ro = rollout_return(policy, model, norm, ep, t0, length, args.gamma,
                                 grad_decay=args.grad_decay, comfort_scale=args.comfort_scale,
                                 anchor=anchor, return_dev=True, keep_states=critic is not None,
