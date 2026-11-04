@@ -108,7 +108,7 @@ def physics_step(state, ep, t, temp_obs):
     za = torch.as_tensor(ep.schema.zone_ahu).long()
     ahu_on = (state["aact_prev"][:, za, 0] > 0).float()
     oat = ep.aobs[t][:, :, AHU_OAT].mean(-1)
-    p = phys_update(p, temp_obs, oat, ep.zobs[t][:, :, 1], state["zact_prev"][..., 1], ahu_on)
+    p = phys_update(p, temp_obs, oat, ep.zobs[t][:, :, 1], state["zact_prev"][..., 1], ahu_on, ep.zobs[t][:, :, 2])
     to_start = schedule_features(ep.gobs[t], *ep.sched)[..., 0] * 24.0
     return phys_features(p, oat, to_start), phys_state(p)
 

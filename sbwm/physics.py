@@ -15,7 +15,8 @@ model) and at deployment (observed temperatures):
     hsp         highest heating setpoint seen, the comfort setpoint [K]
     free, heat  consecutive steps in free floating and in recovery
 
-From this state the policy receives, per zone (PHYS_IN = 11):
+From this state and the current setpoints the policy receives, per zone
+(PHYS_IN = 14):
 
     1. indoor-outdoor difference (T - T_out) / 20
     2-4. temperature change over 30 min, 1 h and 4 h [K] / 1, 2, 4
@@ -26,6 +27,13 @@ From this state the policy receives, per zone (PHYS_IN = 11):
     10. (T_ff - hsp) / 5, with T_ff the free-floating temperature expected at
         the next comfort start, T_out + (T - T_out) exp(-dt * inv_tau)
     11. preheat slack (dt - max(hsp - T_ff, 0) / rec) / 24, in [-1, 3]
+    12. (current heating setpoint - T) / 5
+    13. (current cooling setpoint - T) / 5
+    14. (hsp - T_out) / 20, the outdoor difference at the comfort setpoint
+
+Features 12-14 follow Brandi et al. (Energy and Buildings, 2020), where
+setpoint-referenced temperature differences generalized better across
+setpoints and schedules than absolute temperatures.
 
 where T is the smoothed temperature. The estimates start from priors at the
 beginning of an episode and are refined with exponential averages over valid
@@ -43,7 +51,7 @@ import math
 import numpy as np
 import torch
 
-PHYS_IN = 11
+PHYS_IN = 14
 BUF = 49  # current plus 48 past smoothed temperatures (4 h)
 LAGS = (6, 12, 48)  # 30 min, 1 h, 4 h
 SCALES = (1.0, 2.0, 4.0)
@@ -52,7 +60,8 @@ HLAGS = (12, 24, 48)  # hours
 HSCALES = (6.0, 8.0, 10.0)
 PRIOR_INV_TAU = 0.02  # 1/h, a time constant of 50 h
 PRIOR_REC = 3.0  # K/h
-PRIOR_HSP = 294.15  # K, used when no setpoint is observed
+PRIOR_HSP = 294.15  # K, used when no heating setpoint is observed
+PRIOR_CSP = 297.15  # K, used when no cooling setpoint is observed
 A_TS = math.exp(-1.0 / 3)  # smoothing of the observed temperature (15 min)
 A_EST = math.exp(-1.0 / 288)  # estimates average about one day of valid samples
 KEYS = ("phys_ts", "phys_buf", "phys_hbuf", "phys_n", "phys_inv_tau", "phys_rec", "phys_hsp", "phys_free",
@@ -81,7 +90,7 @@ def phys_init(temp: torch.Tensor, hsp: torch.Tensor) -> dict:
 
 
 def phys_update(p: dict, temp: torch.Tensor, oat: torch.Tensor, hsp: torch.Tensor,
-                reheat_prev: torch.Tensor, ahu_on_prev: torch.Tensor) -> dict:
+                reheat_prev: torch.Tensor, ahu_on_prev: torch.Tensor, csp: torch.Tensor | None = None) -> dict:
     """State after observing the decision step.
 
     temp, hsp, reheat_prev (normalized command) and ahu_on_prev (0/1 for each
@@ -118,6 +127,9 @@ def phys_update(p: dict, temp: torch.Tensor, oat: torch.Tensor, hsp: torch.Tenso
         "phys_heat": heat,
         "_buf": buf,
         "_ts": ts_g,
+        "_hsp": hsp,
+        "_csp": torch.full_like(hsp, PRIOR_CSP) if csp is None else
+        torch.where(csp.detach() > 250.0, csp.detach(), torch.full_like(hsp, PRIOR_CSP)),
     }
 
 
@@ -134,7 +146,8 @@ def phys_features(p: dict, oat: torch.Tensor, hours_to_start: torch.Tensor) -> t
     need = (p["phys_hsp"] - t_ff).clamp(min=0.0) / p["phys_rec"].clamp(min=0.5)
     slack = ((dt - need) / 24.0).clamp(-1.0, 3.0)
     return torch.stack([dout / 20.0, *diffs, p["phys_inv_tau"] * 50.0, p["phys_rec"] / 3.0,
-                        (t_ff - p["phys_hsp"]) / 5.0, slack], -1)
+                        (t_ff - p["phys_hsp"]) / 5.0, slack, (p["_hsp"] - temp) / 5.0, (p["_csp"] - temp) / 5.0,
+                        (p["phys_hsp"] - oat) / 20.0], -1)
 
 
 def phys_state(p: dict) -> dict:

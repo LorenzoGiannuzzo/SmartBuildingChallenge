@@ -47,7 +47,9 @@ implemented together with the next model change.
 - `sbwm/physics.py`: per-zone state updated at every decision, identical in
   the DPC rollouts and at deployment (the logged prefix of a rollout is
   replayed with the same recursion, in numpy for speed); extra zone inputs
-  with `--phys` (11 in total): indoor-outdoor difference, temperature change over 30 min,
+  with `--phys` (14 in total): indoor-outdoor difference, heating and cooling
+  setpoint minus zone temperature and comfort setpoint minus outdoor air
+  (setpoint-referenced, after Brandi et al. 2020), temperature change over 30 min,
   1 h and 4 h (on the temperature smoothed over 15 min against the sensor
   noise of 0.3-0.6 K), and over 12, 24 and 48 h (hourly samples), estimated time constant of the free-floating zone and
   recovery rate, free-floating temperature expected at the next comfort start

@@ -501,7 +501,7 @@ def _policy_physics(self, temp_k: torch.Tensor, zobs: torch.Tensor, aobs: torch.
     if self.phys_p is None:
         self.phys_p = phys_init(temp_k, hsp)
     ahu_on = (self.aact_prev[0, self.zone_ahu.long().clamp(min=0), 0] > 0).float().unsqueeze(0)
-    p = phys_update(self.phys_p, temp_k, oat, hsp, self.zact_prev[..., 1], ahu_on)
+    p = phys_update(self.phys_p, temp_k, oat, hsp, self.zact_prev[..., 1], ahu_on, zobs[..., 2])
     self.phys_p = phys_state(p)
     to_start = schedule_features(gobs, *self.sched)[..., 0] * 24.0
     return phys_features(p, oat, to_start)
