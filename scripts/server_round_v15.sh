@@ -14,7 +14,9 @@
 #      each policy is evaluated on 14 days as soon as its batch ends;
 #   2. ranking of rounds v14 and v15 together; the two best get the light frost
 #      guard (5-8 C, kept in every policy from now on, so that the building
-#      never drops below about 5 C), 14-day evaluation and control figures.
+#      never drops below about 5 C), 14-day evaluation and control figures;
+#   3. slower decisions at deployment on the best policy: commands held for 10
+#      and 15 min (sbwm.set_hold), 14-day evaluation.
 source "$(dirname "$0")/server_env.sh"
 mkdir -p logs
 
@@ -98,4 +100,13 @@ for w in "${BEST[@]}"; do FROST "$w" 5 8; FR+=("${w%.pt}_fr5.pt"); done
 REFS=(pid_water policies/v11_long_fit3.pt policies/v13_mem_2wm.pt)
 py -m sbwm.inspect_control --policies "${REFS[@]}" "${BEST[@]}" "${FR[@]}" --steps 2016 --workers "$WORKERS"
 push_results "Control figures of round v15" results/inspect
+
+# 3. commands held for 10 and 15 min on the best policy
+for k in 2 3; do
+    w="${BEST[0]%.pt}_h$k.pt"
+    if [ -f "$w" ]; then continue; fi
+    py -m sbwm.set_hold "${BEST[0]}" "$w" "$k"
+    EVAL "$w"
+    push_results "14-day official evaluation of $w (commands held for $((5 * k)) min)" "$w" results/official30_14d.json
+done
 echo "round v15 finished, best of v14 and v15: ${BEST[*]}"

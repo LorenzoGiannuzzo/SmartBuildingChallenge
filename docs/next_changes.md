@@ -67,3 +67,8 @@ implemented together with the next model change.
   policy from round v15 on, including the Kaggle bundles, so the building never
   drops below about 5 C; on rounds v11/v13 it costs about 0.0003 on the
   14-day score (0.0106 to 0.0109).
+- Slower decisions: `action_hold` in the checkpoint (`sbwm.set_hold src dst k`)
+  repeats the commands for k decisions at deployment; round v15 evaluates
+  10 and 15 min on its best policy. If it helps, the next step is a hierarchy
+  inside training (plant commands every 15-30 min, zones every 5 min with the
+  filter); the old smoothness penalty in training made things worse.
