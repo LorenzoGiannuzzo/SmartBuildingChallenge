@@ -17,7 +17,8 @@
 #        v14_2wm_s{0,1,2}   recipe of v13_mem_2wm (world models v11 and v12,
 #                           24 h horizon) with 30% of the start states on
 #                           Fridays and Saturdays, three seeds;
-#        v14_48_s{0,1,2}    world model v14, 48 h horizon, memory, holidays and
+#        v14_48_s{0,1,2}    world model v14, 48 h horizon with discount 0.999
+#                           (0.995 halves the weight every 11.5 h), memory, holidays and
 #                           weekend start states, three seeds;
 #        v14_new2wm         world models v14 and v12, 24 h horizon, as v14_2wm;
 #      each policy is evaluated on 14 days as soon as its batch ends;
@@ -70,7 +71,7 @@ for d in pc_data/episodes pc_data/episodes_onpolicy pc_data/episodes_onpolicy_v4
     if [ -d "$d" ]; then DPC_TRAIN+=("$d"); fi
 done
 LONG="--lengths 144 288 --grad-decay 0.99 --action-filter 0.3"
-LONG48="--lengths 288 576 --grad-decay 0.995 --action-filter 0.3"
+LONG48="--lengths 288 576 --grad-decay 0.995 --gamma 0.999 --action-filter 0.3"
 MEM="--policy-mem --holiday --weekend-boost 0.3"
 declare -A VARIANTS=(
     [2wm_s0]="--wm world_models/wm_v11.pt world_models/wm_v12.pt $LONG $MEM --seed 0"
