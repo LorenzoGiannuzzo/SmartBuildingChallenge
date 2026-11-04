@@ -18,6 +18,10 @@ fi
 WORKERS="${WORKERS:-28}"   # simulations in parallel (32 cores, a few left for the system)
 THREADS="${THREADS:-16}"   # torch threads for world-model and policy training
 
+#Lorenzo Giannuzzo: git must never wait for a password in a background round;
+#without stored credentials a push fails (and is retried with the next one).
+export GIT_TERMINAL_PROMPT=0
+
 py() { docker compose run --rm -T sbwm python "$@"; }
 
 push_results() {
