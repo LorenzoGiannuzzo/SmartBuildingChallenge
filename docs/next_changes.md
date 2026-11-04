@@ -46,10 +46,10 @@ implemented together with the next model change.
 
 - `sbwm/physics.py`: per-zone state updated at every decision, identical in
   the DPC rollouts and at deployment (the logged prefix of a rollout is
-  replayed with the same recursion, in numpy for speed); 8 extra zone inputs
-  with `--phys`: indoor-outdoor difference, temperature change over 30 min,
+  replayed with the same recursion, in numpy for speed); extra zone inputs
+  with `--phys` (11 in total): indoor-outdoor difference, temperature change over 30 min,
   1 h and 4 h (on the temperature smoothed over 15 min against the sensor
-  noise of 0.3-0.6 K), estimated time constant of the free-floating zone and
+  noise of 0.3-0.6 K), and over 12, 24 and 48 h (hourly samples), estimated time constant of the free-floating zone and
   recovery rate, free-floating temperature expected at the next comfort start
   and preheat slack (the optimal-start signal).
 - New inputs start with zero weights (`init_policy`), so each policy begins as

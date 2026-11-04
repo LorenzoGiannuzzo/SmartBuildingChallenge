@@ -8,20 +8,24 @@ model) and at deployment (observed temperatures):
     ts          observed temperature smoothed over about 15 min [K], against
                 the sensor noise (0.3-0.6 K) of the official scenarios
     buffer      last 48 smoothed temperatures (most recent first) [K]
+    hourly      smoothed temperature sampled every hour, last 49 samples [K]
+    n           decisions taken so far (sets the hourly sampling)
     inv_tau     estimated inverse time constant of the free-floating zone [1/h]
     rec         estimated recovery rate while heating at full reheat [K/h]
     hsp         highest heating setpoint seen, the comfort setpoint [K]
     free, heat  consecutive steps in free floating and in recovery
 
-From this state the policy receives, per zone (PHYS_IN = 8):
+From this state the policy receives, per zone (PHYS_IN = 11):
 
     1. indoor-outdoor difference (T - T_out) / 20
     2-4. temperature change over 30 min, 1 h and 4 h [K] / 1, 2, 4
-    5. inv_tau * 50 (about 1 for a 50 h time constant)
-    6. rec / 3
-    7. (T_ff - hsp) / 5, with T_ff the free-floating temperature expected at
-       the next comfort start, T_out + (T - T_out) exp(-dt * inv_tau)
-    8. preheat slack (dt - max(hsp - T_ff, 0) / rec) / 24, in [-1, 3]
+    5-7. temperature change over 12, 24 and 48 h [K] / 6, 8, 10, from the
+       hourly samples (the lag is exact to within one hour)
+    8. inv_tau * 50 (about 1 for a 50 h time constant)
+    9. rec / 3
+    10. (T_ff - hsp) / 5, with T_ff the free-floating temperature expected at
+        the next comfort start, T_out + (T - T_out) exp(-dt * inv_tau)
+    11. preheat slack (dt - max(hsp - T_ff, 0) / rec) / 24, in [-1, 3]
 
 where T is the smoothed temperature. The estimates start from priors at the
 beginning of an episode and are refined with exponential averages over valid
@@ -39,16 +43,20 @@ import math
 import numpy as np
 import torch
 
-PHYS_IN = 8
+PHYS_IN = 11
 BUF = 49  # current plus 48 past smoothed temperatures (4 h)
 LAGS = (6, 12, 48)  # 30 min, 1 h, 4 h
 SCALES = (1.0, 2.0, 4.0)
+HBUF = 49  # hourly samples (48 h)
+HLAGS = (12, 24, 48)  # hours
+HSCALES = (6.0, 8.0, 10.0)
 PRIOR_INV_TAU = 0.02  # 1/h, a time constant of 50 h
 PRIOR_REC = 3.0  # K/h
 PRIOR_HSP = 294.15  # K, used when no setpoint is observed
 A_TS = math.exp(-1.0 / 3)  # smoothing of the observed temperature (15 min)
 A_EST = math.exp(-1.0 / 288)  # estimates average about one day of valid samples
-KEYS = ("phys_ts", "phys_buf", "phys_inv_tau", "phys_rec", "phys_hsp", "phys_free", "phys_heat")
+KEYS = ("phys_ts", "phys_buf", "phys_hbuf", "phys_n", "phys_inv_tau", "phys_rec", "phys_hsp", "phys_free",
+        "phys_heat")
 
 
 def _valid_hsp(hsp):
@@ -62,6 +70,8 @@ def phys_init(temp: torch.Tensor, hsp: torch.Tensor) -> dict:
     return {
         "phys_ts": temp.clone(),
         "phys_buf": temp.unsqueeze(1).repeat(1, BUF - 1, 1),
+        "phys_hbuf": temp.unsqueeze(1).repeat(1, HBUF, 1),
+        "phys_n": torch.zeros(b),
         "phys_inv_tau": torch.full((b, v), PRIOR_INV_TAU),
         "phys_rec": torch.full((b, v), PRIOR_REC),
         "phys_hsp": _valid_hsp(hsp.detach()),
@@ -92,9 +102,15 @@ def phys_update(p: dict, temp: torch.Tensor, oat: torch.Tensor, hsp: torch.Tenso
     r_tau = (-d1h / dout.clamp(min=5.0)).clamp(0.0, 0.2)
     inv_tau = torch.where(free >= 12, A_EST * p["phys_inv_tau"] + (1 - A_EST) * r_tau, p["phys_inv_tau"])
     rec = torch.where(heat >= 12, A_EST * p["phys_rec"] + (1 - A_EST) * d1h.clamp(0.0, 15.0), p["phys_rec"])
+    #Lorenzo Giannuzzo: one hourly sample every 12 decisions, starting with the
+    #first one, keeps 48 h of history at a twelfth of the memory.
+    push = (torch.remainder(p["phys_n"], 12) == 0).view(-1, 1, 1)
+    hbuf = torch.where(push, torch.cat([ts.unsqueeze(1), p["phys_hbuf"][:, :-1]], 1), p["phys_hbuf"])
     return {
         "phys_ts": ts,
         "phys_buf": buf[:, :BUF - 1],
+        "phys_hbuf": hbuf,
+        "phys_n": p["phys_n"] + 1,
         "phys_inv_tau": inv_tau,
         "phys_rec": rec,
         "phys_hsp": torch.maximum(p["phys_hsp"], hsp),
@@ -112,6 +128,7 @@ def phys_features(p: dict, oat: torch.Tensor, hours_to_start: torch.Tensor) -> t
     oat = oat.unsqueeze(-1)
     dout = temp - oat
     diffs = [(temp - buf[:, lag]) / s for lag, s in zip(LAGS, SCALES)]
+    diffs += [(temp - p["phys_hbuf"][:, lag]) / s for lag, s in zip(HLAGS, HSCALES)]
     dt = hours_to_start.unsqueeze(-1)
     t_ff = oat + dout * torch.exp(-dt * p["phys_inv_tau"])
     need = (p["phys_hsp"] - t_ff).clamp(min=0.0) / p["phys_rec"].clamp(min=0.5)
@@ -192,7 +209,12 @@ def phys_at(ep, t0: torch.Tensor) -> dict:
     e = episode_phys(ep)
     prev = (t0 - 1).clamp(min=0)
     idx = torch.stack([(t0 - 1 - i).clamp(min=0) for i in range(BUF - 1)], 1)  # (B, 48)
-    p = {"phys_ts": e["ts"][prev], "phys_buf": e["ts"][idx]}
+    #Lorenzo Giannuzzo: hourly samples were taken at the decisions 0, 12, 24...;
+    #before the first one the buffer holds the first observation, as ts[0].
+    last = torch.div(t0 - 1, 12, rounding_mode="floor") * 12  # latest sampled decision
+    hidx = torch.stack([(last - 12 * k).clamp(min=0) for k in range(HBUF)], 1)  # (B, 49)
+    p = {"phys_ts": e["ts"][prev], "phys_buf": e["ts"][idx], "phys_hbuf": e["ts"][hidx],
+         "phys_n": t0.float()}
     for k in ("inv_tau", "rec", "hsp", "free", "heat"):
         p["phys_" + k] = e[k][prev]
     first = t0 == 0
