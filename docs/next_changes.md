@@ -72,3 +72,17 @@ implemented together with the next model change.
   10 and 15 min on its best policy. If it helps, the next step is a hierarchy
   inside training (plant commands every 15-30 min, zones every 5 min with the
   filter); the old smoothness penalty in training made things worse.
+
+## Round v16 (queued after v15)
+
+- Kappa (comfort weight of the DPC objective) 1.0 and 1.4 against 1.8 on the
+  v14_new2wm recipe, two seeds each, plus a second seed at 1.8. Evaluation is
+  always with the official reward; world model v14 overestimates discomfort
+  (comfort ratio 1.22 replay, 1.08 closed loop), so 1.8 may double-count it.
+  History: on WM-1, kappa 1.0 beat 1.8 (abl_A10 0.0137 vs abl_A 0.0151, 7 d);
+  on WM-3, 1.8 beat 1.0 (v10_base 0.0156 vs v10_base10 0.0299, 7 d).
+- Minimum on/off time of boiler loop and air handlers at deployment
+  (`min_run`, anti-short-cycling). On Fairbanks 1 (14 d) with v14_48_s0, 30 min
+  cut the weekend boiler switches from 232 to 25 and improved the score from
+  0.0659 to 0.0650.
+- `sbwm/set_option.py` sets any deployment option of a checkpoint.

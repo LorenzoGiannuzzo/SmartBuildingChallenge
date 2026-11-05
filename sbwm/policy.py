@@ -367,6 +367,27 @@ class DPCPolicy:
         self.hold = int(ck.get("action_hold", 1) or 1)
         self.held = None
         self.step_i = 0
+        #Lorenzo Giannuzzo: optional minimum on and off time of the boiler loop
+        #and of the air handlers at deployment ("min_run", in decisions), as the
+        #anti-short-cycling delay of real plants: a switch is applied only when
+        #the current state has lasted at least that long.
+        self.min_run = int(ck.get("min_run", 0) or 0)
+        self.run_state = None
+        self.run_age = None
+
+    def _min_run(self, aact, hact):
+        want = torch.cat([aact[0, :, 0] > 0, hact[0, :1] > 0])  # air handlers, then boiler loop
+        if self.run_state is None:
+            self.run_state, self.run_age = want.clone(), torch.zeros(want.shape, dtype=torch.long)
+        switch = (want != self.run_state) & (self.run_age >= self.min_run)
+        self.run_state = torch.where(switch, want, self.run_state)
+        self.run_age = torch.where(switch, torch.zeros_like(self.run_age), self.run_age + 1)
+        sign = self.run_state.float() * 2.0 - 1.0
+        a = aact.clone()
+        a[0, :, 0] = sign[:-1]
+        h = hact.clone()
+        h[0, 0] = sign[-1]
+        return a, h
 
     def _frost_guard(self, temp_k, hod, zact, aact, hact):
         #Lorenzo Giannuzzo: the trigger is a low quantile of the zone
@@ -462,6 +483,8 @@ class DPCPolicy:
             self.ema_u = a_u * self.ema_u + (1 - a_u) * x_u
         if self.water_floor is not None:
             hact = torch.cat([hact[..., :1], hact[..., 1:2].clamp(min=self.water_floor), hact[..., 2:]], -1)
+        if self.min_run > 0:
+            aact, hact = self._min_run(aact, hact)
         if self.frost is not None:
             zact, aact, hact = self._frost_guard(temp_k, hod, zact, aact, hact)
         out = to_env_action(s, zact[0].numpy(), aact[0].numpy(), hact[0].numpy())
