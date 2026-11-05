@@ -89,3 +89,18 @@ implemented together with the next model change.
   deployment (`plant_hold`), zones still every 5 min; tested in round v16 on
   the best policy. Round v15 holds all commands (`action_hold`).
 - `sbwm/set_option.py` sets any deployment option of a checkpoint.
+
+## Oracle bound (queued after v16)
+
+- `sbwm/oracle.py`: receding-horizon search with the true simulator. Every
+  hour, 31 candidate modifications of the policy commands (plant forced
+  off/on, supply-water, supply-air and reheat offsets) are tried on forked
+  copies of the simulator over 24 h, the policy continuing after the first
+  hour; the best is applied. The pure policy is always a candidate.
+  Simulator cloning works by sharing the constant sparse LU factorization of
+  the thermal solver (deep copy verified identical on Denver 8).
+- `scripts/server_oracle.sh`: best policy of v14-v16 alone and in the oracle,
+  7 days on Fairbanks 1, Phoenix 5 and Denver 8.
+- Next, depending on the gap: planning at deployment with the world model
+  (gradient refinement of the policy commands every hour), then online
+  correction of the world model per building.
