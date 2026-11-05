@@ -367,6 +367,12 @@ class DPCPolicy:
         self.hold = int(ck.get("action_hold", 1) or 1)
         self.held = None
         self.step_i = 0
+        #Lorenzo Giannuzzo: optional hold of the plant commands only ("plant_hold",
+        #in decisions): air handlers and hot-water loop are updated every k steps,
+        #the zone dampers and reheat valves at every step.
+        self.plant_hold = int(ck.get("plant_hold", 1) or 1)
+        self.plant_held = None
+        self.plant_i = 0
         #Lorenzo Giannuzzo: optional minimum on and off time of the boiler loop
         #and of the air handlers at deployment ("min_run", in decisions), as the
         #anti-short-cycling delay of real plants: a switch is applied only when
@@ -473,6 +479,12 @@ class DPCPolicy:
             else:
                 zact, aact, hact = self.held
             self.step_i += 1
+        if self.plant_hold > 1:
+            if self.plant_i % self.plant_hold == 0 or self.plant_held is None:
+                self.plant_held = (aact, hact)
+            else:
+                aact, hact = self.plant_held
+            self.plant_i += 1
         self.zact_prev, self.aact_prev, self.hact_prev = zact, aact, hact
         if self.net.mem:
             from sbwm.world_model import MEM_U_TAUS

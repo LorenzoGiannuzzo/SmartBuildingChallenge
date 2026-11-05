@@ -85,4 +85,7 @@ implemented together with the next model change.
   (`min_run`, anti-short-cycling). On Fairbanks 1 (14 d) with v14_48_s0, 30 min
   cut the weekend boiler switches from 232 to 25 and improved the score from
   0.0659 to 0.0650.
+- Plant commands (air handlers, hot-water loop) held for 15 or 30 min at
+  deployment (`plant_hold`), zones still every 5 min; tested in round v16 on
+  the best policy. Round v15 holds all commands (`action_hold`).
 - `sbwm/set_option.py` sets any deployment option of a checkpoint.

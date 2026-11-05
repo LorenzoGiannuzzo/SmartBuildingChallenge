@@ -17,7 +17,9 @@
 #      each, and kappa 1.8 with a second seed; 14-day evaluation;
 #   2. the best policy of rounds v14-v16 with a minimum on/off time of 30 min
 #      for the boiler loop and the air handlers (anti-short-cycling), alone and
-#      with the light frost guard; 14-day evaluation and control figures.
+#      with the light frost guard, and with the plant commands (air handlers,
+#      hot-water loop) updated every 15 or 30 min while the zones keep 5 min;
+#      14-day evaluation and control figures.
 source "$(dirname "$0")/server_env.sh"
 mkdir -p logs
 
@@ -77,13 +79,13 @@ run_batch "${BATCH2[@]}"
 # 2. minimum on/off time on the best policy of rounds v14-v16
 ALL=()
 for w in policies/v14_*.pt policies/v15_*.pt policies/v16_*.pt; do
-    case "$w" in *_fr*|*_h[0-9]*|*_mr*) continue ;; esac
+    case "$w" in *_fr*|*_h[0-9]*|*_mr*|*_ph*) continue ;; esac
     if [ -f "$w" ]; then ALL+=("$w"); fi
 done
 read -r -a BEST <<< "$(py -m sbwm.pick_best results/official30_14d.json 1 "${ALL[@]}")"
 b="${BEST[0]}"
 OUT=()
-for v in "mr6:min_run=6" "mr6_fr5:min_run=6 frost_guard=5,8"; do
+for v in "mr6:min_run=6" "mr6_fr5:min_run=6 frost_guard=5,8" "ph3:plant_hold=3" "ph6:plant_hold=6"; do
     tag="${v%%:*}"; opts="${v#*:}"
     w="${b%.pt}_$tag.pt"
     OUT+=("$w")

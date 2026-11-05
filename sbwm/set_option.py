@@ -1,6 +1,6 @@
 """Copy a policy checkpoint with deployment options set.
 
-Options: water_floor=F, frost_guard=ON,OFF[,Q], action_hold=K, min_run=K,
+Options: water_floor=F, frost_guard=ON,OFF[,Q], action_hold=K, plant_hold=K, min_run=K,
 action_filter=A (see sbwm.policy.DPCPolicy).
 
 Usage:
@@ -13,7 +13,7 @@ import sys
 
 import torch
 
-INT = {"action_hold", "min_run"}
+INT = {"action_hold", "plant_hold", "min_run"}
 
 
 def main():
