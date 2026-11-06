@@ -102,12 +102,11 @@ def fig_impact():
     clim = list(CLIMATES)
     m = np.array([[np.mean([v for sc, v in tot[k].items() if f"/{c}_" in sc]) for k in keys] for c in clim])
     ratio = m / m[:, :1]
-    #Lorenzo Giannuzzo: the dark part of the magma scale, ending on a strong
-    #orange instead of the pale yellow of the full scale.
+    #Lorenzo Giannuzzo: blue-red scale, from light blue (large reduction) to
+    #dark red (close to the PID baseline).
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
-    mag = plt.get_cmap("magma")
-    cmap = LinearSegmentedColormap.from_list("magma_orange", [mag(0.0), mag(0.2), mag(0.4), mag(0.58),
-                                                              to_rgb("#f57c00")])
+    cmap = LinearSegmentedColormap.from_list("blue_red", [to_rgb(c) for c in
+                                                          ("#cfe8f7", "#f3d9cc", "#e07a5f", "#b22222", "#6b0000")])
     im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=0.0, vmax=0.6,
                     extent=(-0.5, len(keys) - 0.5, len(clim) - 0.5, -0.5))
     for i in range(len(clim)):
