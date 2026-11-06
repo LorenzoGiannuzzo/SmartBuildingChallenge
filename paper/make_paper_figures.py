@@ -106,12 +106,14 @@ def fig_impact():
     #dark red (close to the PID baseline).
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
     cmap = LinearSegmentedColormap.from_list("blue_red", [to_rgb(c) for c in
-                                                          ("#cfe8f7", "#f3d9cc", "#e07a5f", "#b22222", "#6b0000")])
-    im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=0.0, vmax=0.6,
+                                                          ("#2c7bb6", "#abd9e9", "#f7f7f7", "#f4a582", "#b2182b",
+                                                           "#67001f")])
+    vmin, vmax = 0.1, 0.45
+    im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=vmin, vmax=vmax,
                     extent=(-0.5, len(keys) - 0.5, len(clim) - 0.5, -0.5))
     for i in range(len(clim)):
         for j in range(len(keys)):
-            r, g, b, _ = cmap(min(ratio[i, j] / 0.6, 1.0))
+            r, g, b, _ = cmap(np.clip((ratio[i, j] - vmin) / (vmax - vmin), 0.0, 1.0))
             axh.text(j, i, f"{m[i, j]:.4f}", ha="center", va="center", fontsize=6.5,
                      color="white" if 0.299 * r + 0.587 * g + 0.114 * b < 0.5 else "black")
     axh.set_yticks(range(len(clim)), [CLIMATES[c] for c in clim], fontsize=7.5)
