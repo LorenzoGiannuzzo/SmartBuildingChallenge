@@ -84,11 +84,11 @@ def fig_impact():
     for i, t in enumerate(total):
         ax.text(x[i], t + 0.0012, f"{t:.4f}", ha="center", va="bottom", fontsize=7)
     kx = [i for i, (_, _, k) in enumerate(STAGES) if k]
-    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color="#f57c00",
+    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color="#8b0000",
                     edgecolor="black", lw=0.4, zorder=4, label="Kaggle Public Leaderboard")
     for i in kx:
         ax.text(x[i] + 0.36, STAGES[i][2] + 0.0022, f"{STAGES[i][2]:.3f}", ha="center", va="bottom", fontsize=6.5,
-                color="#f57c00")
+                color="#8b0000")
     ax.set_ylabel("Mean Absolute Step\nReward [-]")
     ax.set_ylim(0, 0.068)
     ax.set_xlim(-0.5, len(keys) - 0.5)
@@ -204,9 +204,9 @@ def fig_headroom():
     scen = [("fairbanks_1", "Fairbanks 1"), ("denver_8", "Denver 8"), ("phoenix_5", "Phoenix 5")]
     #Lorenzo Giannuzzo: scores relative to the final policy in the same
     #scenario, so that the three climates share one scale.
-    series = [("Oracle With Simulator", "#7b2d8e", [orc[s] / base[s] for s, _ in scen]),
-              ("Planner With World Model 3", "#ff8c00", [pl[("naive", s)] / base[s] for s, _ in scen]),
-              ("Planner With World Models 1-3", "#2166ac", [pl[("safe", s)] / base[s] for s, _ in scen])]
+    series = [("Oracle With Simulator", C_OLD, [orc[s] / base[s] for s, _ in scen]),
+              ("Planner With World Model 3", C_KAGGLE, [pl[("naive", s)] / base[s] for s, _ in scen]),
+              ("Planner With World Models 1-3", C_NEW, [pl[("safe", s)] / base[s] for s, _ in scen])]
     fig, ax = plt.subplots(figsize=(5.6, 1.25))
     w = 0.24
     for j, (lab, col, v) in enumerate(series):
@@ -217,7 +217,7 @@ def fig_headroom():
     ax.axhline(1.0, color="black", lw=0.8, ls="--", label="Final Policy")
     ax.set_ylim(0, 1.4)
     ax.set_xticks(range(len(scen)), [n for _, n in scen])
-    ax.set_ylabel("Score Relative To\nFinal Policy [-]", fontsize=7.5)
+    ax.set_ylabel("Relative\nScore [-]", fontsize=7.5)
     ax.set_yticks([0, 0.5, 1.0])
     ax.grid(axis="y", lw=0.4, alpha=0.5)
     ax.set_axisbelow(True)
