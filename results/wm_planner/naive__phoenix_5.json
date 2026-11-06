@@ -1,0 +1,49 @@
+[
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_1/phoenix_5",
+  "weights": "policies/v14_new2wm.pt",
+  "wm": [
+   "world_models/wm_v14.pt"
+  ],
+  "steps": 2016,
+  "every": 12,
+  "horizon": 288,
+  "candidates": 31,
+  "policy_alone": 0.014945894014757212,
+  "mean_reward": -0.01740247169473365,
+  "comfort": -0.002568953028779896,
+  "energy": -0.011236503186785112,
+  "carbon": -0.0035970154591722075,
+  "chosen": {
+   "plant": {
+    "off": 34,
+    "on": 33,
+    "policy": 101
+   },
+   "water": {
+    "-0.5": 59,
+    "0.0": 64,
+    "0.5": 26,
+    "1.0": 19
+   },
+   "supply": {
+    "-0.5": 64,
+    "0.0": 32,
+    "0.5": 72
+   },
+   "reheat": {
+    "-0.3": 44,
+    "0.0": 44,
+    "0.3": 80
+   }
+  },
+  "planning_seconds": 2158.884776353836,
+  "prerun_seconds": 176.32598757743835,
+  "agree": false,
+  "correct": false,
+  "gate": 0.0,
+  "gated_decisions": 0,
+  "replay_mae_1h": null,
+  "seconds": 2515.3141872882843
+ }
+]

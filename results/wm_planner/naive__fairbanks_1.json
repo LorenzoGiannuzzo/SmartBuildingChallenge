@@ -1,0 +1,49 @@
+[
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_1/fairbanks_1",
+  "weights": "policies/v14_new2wm.pt",
+  "wm": [
+   "world_models/wm_v14.pt"
+  ],
+  "steps": 2016,
+  "every": 12,
+  "horizon": 288,
+  "candidates": 31,
+  "policy_alone": 0.05413402637704144,
+  "mean_reward": -0.04535738656124706,
+  "comfort": -0.0076922007523491966,
+  "energy": -0.013598308340157121,
+  "carbon": -0.024066877437076795,
+  "chosen": {
+   "plant": {
+    "off": 38,
+    "on": 90,
+    "policy": 40
+   },
+   "water": {
+    "-0.5": 89,
+    "0.0": 49,
+    "0.5": 22,
+    "1.0": 8
+   },
+   "supply": {
+    "-0.5": 67,
+    "0.0": 36,
+    "0.5": 65
+   },
+   "reheat": {
+    "-0.3": 68,
+    "0.0": 87,
+    "0.3": 13
+   }
+  },
+  "planning_seconds": 2129.797782421112,
+  "prerun_seconds": 178.63637471199036,
+  "agree": false,
+  "correct": false,
+  "gate": 0.0,
+  "gated_decisions": 0,
+  "replay_mae_1h": null,
+  "seconds": 2486.5830433368683
+ }
+]

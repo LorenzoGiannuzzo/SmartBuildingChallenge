@@ -1,0 +1,51 @@
+[
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_2/denver_8",
+  "weights": "policies/v14_new2wm.pt",
+  "wm": [
+   "world_models/wm_v14.pt",
+   "world_models/wm_v12.pt",
+   "world_models/wm_v11.pt"
+  ],
+  "steps": 2016,
+  "every": 12,
+  "horizon": 144,
+  "candidates": 31,
+  "policy_alone": 0.012095526826925156,
+  "mean_reward": -0.011849042117190837,
+  "comfort": -0.005233481550385477,
+  "energy": -0.0025222720509727233,
+  "carbon": -0.004093288466642915,
+  "chosen": {
+   "plant": {
+    "off": 53,
+    "on": 35,
+    "policy": 80
+   },
+   "water": {
+    "-0.5": 93,
+    "0.0": 59,
+    "0.5": 6,
+    "1.0": 10
+   },
+   "supply": {
+    "-0.5": 20,
+    "0.0": 45,
+    "0.5": 103
+   },
+   "reheat": {
+    "-0.3": 70,
+    "0.0": 88,
+    "0.3": 10
+   }
+  },
+  "planning_seconds": 5511.5642919540405,
+  "prerun_seconds": 317.9636113643646,
+  "agree": true,
+  "correct": true,
+  "gate": 1.0,
+  "gated_decisions": 0,
+  "replay_mae_1h": 0.0674016643469674,
+  "seconds": 6136.092905044556
+ }
+]
