@@ -51,7 +51,7 @@ STAGES = [("pid_water", "PID\nBaseline", None),
           ("v11_base_f03", "+ Calibrated\nWorld Model", None),
           ("v11_long_fit3", "+ 12-24 h Horizon\n& Filter In\nTraining", 0.013),
           ("v14_new2wm", "+ 48 h World\nModel & Two\nWorld Models", None)]
-C_COMFORT, C_ENERGY = "#9ecae1", "#1f4e79"
+C_COMFORT, C_ENERGY = "#f57c00", "#5e2a84"
 
 
 def scores(key="mean_reward"):
@@ -75,7 +75,7 @@ def fig_impact():
     total = np.array([np.mean(list(tot[k].values())) for k in keys])
     comfort = np.array([np.mean(list(com[k].values())) for k in keys])
     x = np.arange(len(keys))
-    fig = plt.figure(figsize=(5.6, 2.95))
+    fig = plt.figure(figsize=(5.6, 2.55))
     gs = fig.add_gridspec(2, 1, height_ratios=[1.35, 1.0], hspace=0.08)
     ax = fig.add_subplot(gs[0])
     b1 = ax.bar(x, comfort, 0.56, color=C_COMFORT, edgecolor="black", lw=0.4, label="Comfort")
@@ -84,11 +84,11 @@ def fig_impact():
     for i, t in enumerate(total):
         ax.text(x[i], t + 0.0012, f"{t:.4f}", ha="center", va="bottom", fontsize=7)
     kx = [i for i, (_, _, k) in enumerate(STAGES) if k]
-    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color=C_KAGGLE,
+    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color="#2166ac",
                     edgecolor="black", lw=0.4, zorder=4, label="Kaggle Public Leaderboard")
     for i in kx:
         ax.text(x[i] + 0.36, STAGES[i][2] + 0.0022, f"{STAGES[i][2]:.3f}", ha="center", va="bottom", fontsize=6.5,
-                color=C_KAGGLE)
+                color="#2166ac")
     ax.set_ylabel("Mean Absolute Step\nReward [-]")
     ax.set_ylim(0, 0.068)
     ax.set_xlim(-0.5, len(keys) - 0.5)
@@ -102,12 +102,19 @@ def fig_impact():
     clim = list(CLIMATES)
     m = np.array([[np.mean([v for sc, v in tot[k].items() if f"/{c}_" in sc]) for k in keys] for c in clim])
     ratio = m / m[:, :1]
-    im = axh.imshow(ratio, cmap="Blues_r", aspect="auto", vmin=0.0, vmax=0.6,
+    #Lorenzo Giannuzzo: the dark part of the magma scale, ending on a strong
+    #orange instead of the pale yellow of the full scale.
+    from matplotlib.colors import LinearSegmentedColormap, to_rgb
+    mag = plt.get_cmap("magma")
+    cmap = LinearSegmentedColormap.from_list("magma_orange", [mag(0.0), mag(0.2), mag(0.4), mag(0.58),
+                                                              to_rgb("#f57c00")])
+    im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=0.0, vmax=0.6,
                     extent=(-0.5, len(keys) - 0.5, len(clim) - 0.5, -0.5))
     for i in range(len(clim)):
         for j in range(len(keys)):
+            r, g, b, _ = cmap(min(ratio[i, j] / 0.6, 1.0))
             axh.text(j, i, f"{m[i, j]:.4f}", ha="center", va="center", fontsize=6.5,
-                     color="white" if ratio[i, j] < 0.25 else "black")
+                     color="white" if 0.299 * r + 0.587 * g + 0.114 * b < 0.5 else "black")
     axh.set_yticks(range(len(clim)), [CLIMATES[c] for c in clim], fontsize=7.5)
     axh.set_xticks(x, [lab for _, lab, _ in STAGES], fontsize=7)
     axh.tick_params(length=0)
@@ -139,7 +146,7 @@ def fig_analysis():
                ("World\nModels\n3 & 2\n12-24 h", ["v14_new2wm", "v16_k18_s1"])]
     wms = [("wm_v11", "World Model 1", C_OLD), ("wm_v12", "World Model 2", C_KAGGLE),
            ("wm_v14", "World Model 3", C_NEW)]
-    fig, axes = plt.subplots(1, 3, figsize=(5.6, 1.95), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 1.8), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
     ax = axes[0]
     for i, (lab, ks) in enumerate(recipes):
         v = [mean[k] for k in ks]
@@ -197,9 +204,9 @@ def fig_headroom():
     scen = [("fairbanks_1", "Fairbanks 1"), ("denver_8", "Denver 8"), ("phoenix_5", "Phoenix 5")]
     #Lorenzo Giannuzzo: scores relative to the final policy in the same
     #scenario, so that the three climates share one scale.
-    series = [("Oracle With Simulator", "#2ca02c", [orc[s] / base[s] for s, _ in scen]),
-              ("Planner With World Model 3", C_KAGGLE, [pl[("naive", s)] / base[s] for s, _ in scen]),
-              ("Planner With World Models 1-3", C_OLD, [pl[("safe", s)] / base[s] for s, _ in scen])]
+    series = [("Oracle With Simulator", "#7b2d8e", [orc[s] / base[s] for s, _ in scen]),
+              ("Planner With World Model 3", "#3fd8b8", [pl[("naive", s)] / base[s] for s, _ in scen]),
+              ("Planner With World Models 1-3", "#2166ac", [pl[("safe", s)] / base[s] for s, _ in scen])]
     fig, ax = plt.subplots(figsize=(5.6, 1.5))
     w = 0.24
     for j, (lab, col, v) in enumerate(series):
@@ -231,7 +238,7 @@ def fig_examples():
              "v14_new2wm": ("Final Policy", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.6), sharex="col",
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.25), sharex="col",
                              gridspec_kw={"height_ratios": [0.75, 1.35, 1.05]})
     out = {}
     for c, (scen, title) in enumerate(cases):
