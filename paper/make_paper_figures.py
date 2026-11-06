@@ -75,7 +75,7 @@ def fig_impact():
     total = np.array([np.mean(list(tot[k].values())) for k in keys])
     comfort = np.array([np.mean(list(com[k].values())) for k in keys])
     x = np.arange(len(keys))
-    fig = plt.figure(figsize=(5.6, 2.9))
+    fig = plt.figure(figsize=(5.6, 2.7))
     gs = fig.add_gridspec(2, 1, height_ratios=[1.35, 1.0], hspace=0.08)
     ax = fig.add_subplot(gs[0])
     b1 = ax.bar(x, comfort, 0.56, color=C_COMFORT, edgecolor="black", lw=0.4, label="Comfort")
@@ -147,7 +147,7 @@ def fig_analysis():
                ("World\nModels\n3 & 2\n12-24 h", ["v14_new2wm", "v16_k18_s1"])]
     wms = [("wm_v11", "World Model 1", C_OLD), ("wm_v12", "World Model 2", C_KAGGLE),
            ("wm_v14", "World Model 3", C_NEW)]
-    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.42), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.35), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
     ax = axes[0]
     for i, (lab, ks) in enumerate(recipes):
         v = [mean[k] for k in ks]
@@ -268,17 +268,17 @@ def fig_examples():
         if c == 0:
             t10 = np.percentile(recs["v10_base_f03"]["temp"], 10, axis=1)
             i = np.argmin(np.where(days > 144, t10, np.inf))
-            mark(axes[1, c], days[i] - 4, t10[i - 48], 1, 12)
+            mark(axes[1, c], days[i] - 4, t10[i - 48], 3, 12)
             g = d0["gas_kw"]
             j = np.argmax((days > 144) & (g > 50))
-            mark(axes[2, c], days[j], g[j], 2, 900)
+            mark(axes[2, c], days[j], g[j], 4, 900)
             gp = recs["pid_water"]["gas_kw"]
             k = np.argmin(np.abs(days - 99))
-            mark(axes[2, c], days[k], gp[k], 3, 700)
+            mark(axes[2, c], days[k], gp[k], 1, 700)
         else:
             tp = np.percentile(recs["pid_water"]["temp"], 10, axis=1)
             k = np.argmin(np.abs(days - 81))
-            mark(axes[1, c], days[k], tp[k], 4, -3.5)
+            mark(axes[1, c], days[k], tp[k], 2, -3.5)
         axes[2, c].set_xlabel("Hour Of The Day [h] & Day Of The Week")
         axes[2, c].set_xlim(days[0], days[-1])
         names_d = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
