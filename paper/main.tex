@@ -49,7 +49,7 @@
 \maketitle
 
 \begin{abstract}
-A single controller for the Heating, Ventilation and Air Conditioning (HVAC) systems of unseen buildings has to cope with different numbers of zones and air handlers, different thermal properties and climates ranging from subarctic winters to tropical summers. This work addresses the Smart Buildings Challenge with a policy that learns its own control logic, without deep reinforcement learning or imitation. Every zone, air handler and hot-water system is represented as a token, alongside a global token, and the same transformer architecture, whose attention is biased only by the structural relation between tokens, is used both for a world model of the building and for the policy. The policy is trained by Differentiable Predictive Control (DPC), backpropagating the competition reward through closed-loop rollouts of up to 24 hours inside the world model, which is refined in successive on-policy rounds. On the 30 official scenarios over 14 days, the final policy reduces the mean absolute step reward of the Proportional-Integral-Derivative (PID) baseline from 0.0591 to 0.0106, and it reaches 0.013 on the Kaggle public leaderboard. The calibration of the world model on the reward terms proves more important than its average error.
+A single controller for the Heating, Ventilation and Air Conditioning (HVAC) systems of unseen buildings has to cope with different numbers of zones and air handlers, different thermal properties and climates ranging from subarctic winters to tropical summers. This work addresses the Smart Buildings Challenge with a policy that learns its own control logic, without deep reinforcement learning or imitation. Every zone, air handler and hot-water system is represented as a token, alongside a global token, and the same transformer architecture, whose attention is biased only by the structural relation between tokens, is used both for a world model of the building and for the policy. The policy is trained by Differentiable Predictive Control (DPC), backpropagating the competition reward through closed-loop rollouts of up to 48 hours inside world models that are refined in successive on-policy rounds and alternated during training. On the 30 official scenarios over 14 days, the final policy reduces the mean absolute step reward of the Proportional-Integral-Derivative (PID) baseline from 0.0591 to 0.0103, and the policy of the previous round reaches 0.013 on the Kaggle public leaderboard. The calibration of the world model on the reward terms proves more important than its average error, while a receding-horizon search with the true simulator still recovers about 30\% of the remaining loss in cold and mild climates.
 \end{abstract}
 
 \section{Introduction}
@@ -58,16 +58,16 @@ Heating, Ventilation and Air Conditioning (HVAC) systems are still mostly operat
 
 The approach presented here rests on two choices, the first being the description of the building as a set of entities (zones, air handlers, the hot-water system and a global token for occupancy and time), processed by the same transformer architecture in a world model of the building and in the policy, so that both apply to any building without modification. The second choice is to train the policy neither by trial and error on the simulator nor by imitation of a baseline controller, but by Differentiable Predictive Control (DPC) \cite{drgona2022dpc}: the competition reward is rebuilt from the world-model predictions and maximized by backpropagation through closed-loop rollouts, thereby letting the policy derive its own control logic from the physics captured by the world model, as outlined in Figure~\ref{fig:architecture}. The main contributions of this work are the following:
 \begin{itemize}
-  \item an entity-token world model with long thermal memory, refined in on-policy rounds, with a closed-loop temperature error of 0.82 K after 24 hours on held-out buildings;
-  \item a DPC scheme with rollouts of up to 24 hours and a command filter inside them, which reaches 0.0106 on the 30 official scenarios and 0.013 on the Kaggle public leaderboard, against 0.0591 for the PID baseline;
-  \item an analysis showing that the calibration of the world model on the reward, rather than its average error, determines the policy quality.
+  \item an entity-token world model with long thermal memory, refined in on-policy rounds and trained on rollouts of up to 48 hours, with a closed-loop temperature error of 0.79 K after 24 hours on held-out buildings;
+  \item a DPC scheme with rollouts of up to 48 hours, a command filter inside them and two alternated world models, which reaches 0.0103 on the 30 official scenarios, against 0.0591 for the PID baseline;
+  \item an analysis showing that the calibration of the world model on the reward, rather than its average error, determines the policy quality, and an oracle bound on the remaining headroom.
 \end{itemize}
 
 \section{Related Works}
 
 The Smart Buildings Challenge \cite{goldfeder2026smart} evaluates a single HVAC policy on unseen buildings generated at scale with the simulator of the Smart Buildings Control Suite \cite{goldfeder2024smart}, whereas the Building Optimization Testing (BOPTEST) framework \cite{blum2021boptest} provides detailed individual test cases. MPC is the reference for advanced building control \cite{drgona2020mpc}, but requires a model identified for every building. Deep reinforcement learning has been applied to HVAC control since the work of Wei et al. \cite{wei2017drl}, with sample efficiency, safety and transfer to new buildings as its main obstacles \cite{wang2020rl,pinto2022transfer}.
 
-Differentiable MPC \cite{amos2018diffmpc} embeds an optimization problem in a policy and has been applied to HVAC control with a linear model \cite{chen2019gnurl}, whereas DPC \cite{drgona2022dpc}, adopted in this work, trains an explicit neural policy offline by differentiating a control objective through a model of the system. Learned world models \cite{ha2018world,hafner2020dreamer} allow policies to be trained in imagination, at the risk of exploiting model errors \cite{janner2019mbpo}; Short-Horizon Actor-Critic (SHAC) \cite{xu2022shac} and similar methods address long horizons with a learned value function, whereas the present work relies on an accurate world model and on gradient damping to differentiate directly through horizons of 24 hours. The architecture follows the transformer \cite{vaswani2017attention} with relation-dependent attention biases inspired by Graphormer \cite{ying2021graphormer}.
+Differentiable MPC \cite{amos2018diffmpc} embeds an optimization problem in a policy and has been applied to HVAC control with a linear model \cite{chen2019gnurl}, whereas DPC \cite{drgona2022dpc}, adopted in this work, trains an explicit neural policy offline by differentiating a control objective through a model of the system. Learned world models \cite{ha2018world,hafner2020dreamer} allow policies to be trained in imagination, at the risk of exploiting model errors \cite{janner2019mbpo}; Short-Horizon Actor-Critic (SHAC) \cite{xu2022shac} and similar methods address long horizons with a learned value function, whereas the present work relies on an accurate world model and on gradient damping to differentiate directly through horizons of up to 48 hours.
 
 \section{Methods}
 
@@ -113,7 +113,7 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $\underline{T
 \node[box, text width=2.9cm] (gen) at (1.75,-1.05) {Official Building Generator\\ $\approx$140 Buildings, 6 Climates};
 \node[box, text width=2.9cm] (sim) at (1.75,-2.35) {Smart Buildings Simulator\\ 5-Minute Steps};
 \node[box, text width=2.9cm] (dat) at (1.75,-3.75) {Episodes $\mathcal{D}$\\ Exploration Policy\\ + On-Policy Rounds $\mathcal{D}_m$};
-\node[box, text width=2.9cm, fill=cblue!12] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4, 12, 24 h, Loss (\ref{eq:wmloss})};
+\node[box, text width=2.9cm, fill=cblue!12] (wmt) at (1.75,-5.35) {World-Model Training\\ Closed-Loop Unrolls\\ 4 To 48 h, Loss (\ref{eq:wmloss})};
 \draw[arr] (gen) -- (sim);
 \draw[arr] (sim) -- (dat);
 \draw[arr] (dat) -- (wmt);
@@ -186,7 +186,7 @@ where $n_{v,t}$ is the number of occupants of zone $v$, $T_{v,t}$, $\underline{T
 \label{fig:architecture}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:architecture}(b), a building is represented by $N_b = V + K + 2$ tokens, one per zone, one per air handler, one for the hot-water system and one global token. The input $\mathrm{in}_i$ of a zone concatenates its normalized observations, last three temperature changes, previous commands and seven static descriptors of the floor plan (floor area, two measures of exterior-wall exposure, three of floor position and the number of zones on the same air handler); air-handler and hot-water tokens hold their sensors, including the outdoor air temperature, and previous commands, while the global token carries the comfort-mode flags, the occupancy and the time and, for the policy only, the hours to the next comfort period. Every input vector is first embedded as follows:
+As can be observed in Figure~\ref{fig:architecture}(b), a building is represented by $N_b = V + K + 2$ tokens, one per zone, one per air handler, one for the hot-water system and one global token. The input $\mathrm{in}_i$ of a zone concatenates its normalized observations, last three temperature changes, previous commands and seven static descriptors of the floor plan (area, exterior-wall exposure, floor position and zones on the same air handler); air-handler and hot-water tokens hold their sensors, including the outdoor air temperature, and previous commands, while the global token carries the comfort-mode flags, the occupancy and the time and, for the policy only, the hours to the next comfort period. Every input vector is first embedded as follows:
 \begin{equation}
 x^{(0)}_i = \mathrm{MLP}_{c(i)}(\mathrm{in}_i) + e_{c(i)} ,
 \label{eq:tokens}
@@ -223,14 +223,14 @@ m^{(z,\tau)}_{v,t+1} = \beta_\tau\, m^{(z,\tau)}_{v,t} + (1 - \beta_\tau)\, z_{v
 \end{equation}
 where $m^{(z,\tau)}_{v,t}$ is the exponential average of the signal $z$ with time constant $\tau$, and $z$ is the zone temperature, with time constants $\tau$ of 12, 72 and 288 steps (1, 6 and 24 hours), the reheat and damper commands, with 6 and 24 hours, and the outdoor air temperature, with 6 and 24 hours; during a rollout the averages are updated from the predicted temperatures $\hat{T}$.
 
-The model is trained on closed-loop unrolls of $U \in \{48, 144, 288\}$ steps (4, 12 and 24 hours), in which its own predictions are fed back while the logged actions are replayed, by minimizing the following loss:
+The model is trained on closed-loop unrolls of $U \in \{48, 144, 288\}$ steps (4, 12 and 24 hours), extended to 576 steps (48 hours) in the last round, in which its own predictions are fed back while the logged actions are replayed, by minimizing the following loss:
 \begin{equation}
 \mathcal{L}(\phi) = \frac{1}{U} \sum_{k=1}^{U} \Big( \frac{\sum_v \omega_{v,k}\, (\hat{T}_{v,k} - T_{v,k})^2}{\sigma_{\Delta T}^2 \sum_v \omega_{v,k}} + \mu_R \Big(\frac{\hat{R}_k - R_k}{\sigma_R}\Big)^2 + \mu_s\, \mathcal{L}^{\mathrm{sens}}_k + \mu_P\, \big\| \hat{p}_k - p_k \big\|^2 \Big),
 \label{eq:wmloss}
 \end{equation}
 where $k$ counts the steps of the unroll, the weight $\omega_{v,k}$ equals 4 for occupied zones outside the band or less than 1 K from its edges and 1 otherwise, thereby emphasizing the states in which the reward is sensitive to temperature errors, the second term matches the regret (\ref{eq:regret}) directly, with $\sigma_R = 0.1$, $\mathcal{L}^{\mathrm{sens}}_k$ the error on normalized readbacks and sensors, $p_k$ the power normalized by $K P_0$, and $\mu_R$, $\mu_s$, $\mu_P$ the weights in Table~\ref{tab:hyper}.
 
-The training data come from about 140 buildings of the official generator, with seeds disjoint from those of the official scenarios and of the benchmark buildings, under six weather stations. The first episodes come from an exploration policy alternating the PID baseline, its noisy version, random setpoints and extreme plant states; afterwards, policy and world model alternate in on-policy rounds (Algorithm~\ref{alg:train}), in which the current policy runs one 14-day episode per building, partly with action noise, and the world model is fine-tuned with half of each batch from the new episodes, thereby correcting it in the states that the policy visits. Section~\ref{sec:results} compares five successive world models: WM-1 (exploration data and first rounds), WM-2 (a further round), WM-3 (memory (\ref{eq:memory}) and 24-hour unrolls), WM-4 (a round of the filtered policy on WM-3) and WM-5 (a round with plant setpoints held at random levels).
+The training data come from about 140 buildings of the official generator, with seeds disjoint from those of the official scenarios and of the benchmark buildings, under six weather stations. The first episodes come from an exploration policy alternating the PID baseline, its noisy version, random setpoints and extreme plant states; afterwards, policy and world model alternate in on-policy rounds (Algorithm~\ref{alg:train}), which correct the world model in the states that the policy visits. Section~\ref{sec:results} compares six successive world models: WM-1 (exploration data and first rounds), WM-2 (a further round), WM-3 (memory (\ref{eq:memory}) and 24-hour unrolls), WM-4 (a round of the filtered policy on WM-3), WM-5 (a round with plant setpoints held at random levels) and WM-6 (fine-tuned from WM-4 on 48-hour unrolls).
 
 \subsection{Differentiable Predictive Control}
 
@@ -249,7 +249,7 @@ where $\mathrm{sg}(\cdot)$ is the stop-gradient operator and $\lambda < 1$ the d
 \tilde{u}_t = \alpha\, u_t + (1 - \alpha)\, \tilde{u}_{t-1},
 \label{eq:filter}
 \end{equation}
-where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command applied to the building and $\alpha \in (0, 1]$ the filter coefficient; on/off commands are not filtered, the action $a_t$ is made of $\tilde{u}_t$ and of the on/off commands, and the policy receives $\tilde{u}_{t-1}$ as its previous action, exactly as at deployment. The intermediate policies of Section~\ref{sec:results} apply the filter only at deployment (Filter), the final one also inside the rollouts (Filter In Training). Third, the horizon grows from 12 to 24 hours (from 6 to 12 in the intermediate policies), long enough to experience preheating before occupancy and the drift of the building overnight. Start states are drawn only from generated buildings within the size range of the official ones, and every policy is warm-started from the policy of the previous round. The complete procedure, with the inner DPC loop, is summarized in Algorithm~\ref{alg:train}, and the settings of both networks are listed in Table~\ref{tab:hyper}.
+where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command applied to the building and $\alpha \in (0, 1]$ the filter coefficient; on/off commands are not filtered, and the policy receives $\tilde{u}_{t-1}$ as its previous action, exactly as at deployment. The intermediate policies of Section~\ref{sec:results} apply the filter only at deployment (Filter), the final one also inside the rollouts (Filter In Training). Third, the horizon grows from 12 to 24 hours (from 6 to 12 in the intermediate policies), long enough to experience preheating before occupancy and the drift of the building overnight. In the final policy, every DPC iteration draws one of two world models (WM-6 and WM-5), so that the policy cannot exploit the errors of a single model, the policy also receives the averages (\ref{eq:memory}) of its zones and a holiday flag, and 30\% of the start states fall on Fridays and Saturdays, to represent the weekend and the following start-up. Start states are drawn only from generated buildings within the size range of the official ones, and every policy is warm-started from the policy of the previous round. The complete procedure, with the inner DPC loop, is summarized in Algorithm~\ref{alg:train}, and the settings of both networks are listed in Table~\ref{tab:hyper}.
 
 \begin{algorithm}[H]
 \caption{On-policy rounds of world-model training and DPC training of the policy.}
@@ -259,7 +259,7 @@ where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command app
 \State $\mathcal{D} \gets$ exploration episodes on the generated buildings; train $f_\phi$ on $\mathcal{D}$ with (\ref{eq:wmloss})
 \For{round $m = 1, 2, \dots$}
   \For{$I$ iterations} \Comment{DPC, warm-started from the previous policy}
-    \State $H \gets$ curriculum; sample $B$ starts $t_0$ of an episode; $\hat{s}_{t_0} \gets s_{t_0}$; $\tilde{u} \gets$ logged command
+    \State $H \gets$ curriculum; draw a world model $f_\phi$ of the round; sample $B$ starts $t_0$ of an episode; $\hat{s}_{t_0} \gets s_{t_0}$; $\tilde{u} \gets$ logged command
     \For{$k = 0, \dots, H-1$}
       \State $\tilde{u} \gets \alpha\, \pi_\theta(\hat{s}_{t_0+k}) + (1-\alpha)\,\tilde{u}$ (\ref{eq:filter}); \quad $\hat{s}_{t_0+k+1} \gets f_\phi(\hat{s}_{t_0+k}, \tilde{u}, \xi_{t_0+k})$; \quad memory (\ref{eq:memory})
       \State $\hat{r}_{t_0+k} \gets$ reward rebuilt from $\hat{T}$ and $\hat{P}$ (\ref{eq:dpc}); \quad damp the state gradient (\ref{eq:damp})
@@ -272,7 +272,7 @@ where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command app
 \end{algorithmic}
 \end{algorithm}
 
-\begin{table}[H]
+\begin{table}[!b]
 \caption{Architecture and training settings of the world model and of the final policy.}
 \label{tab:hyper}
 \centering
@@ -285,10 +285,10 @@ where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command app
 \midrule
 Layers, width, heads, feed-forward & 4, 128, 4, 256 \\
 Parameters & 0.61 M \\
-Unroll lengths $U$ [steps] & 48, 144, 288 \\
+Unroll lengths $U$ [steps] & 48, 144, 288, 576 \\
 Loss weights $\mu_R$, $\mu_s$, $\mu_P$ & 5, 0.3, 10 \\
 Memory time constants $\tau$ [steps] & 12, 72, 288 \\
-Batch, steps per round & 16 unrolls, 1000 \\
+Batch, steps per round & 16 unrolls, 1000--1600 \\
 Optimizer, learning rate & AdamW, $5\cdot10^{-5}$ \\
 \bottomrule
 \end{tabular}
@@ -304,6 +304,7 @@ Horizon $H$ (curriculum) [steps] & 144, 288 \\
 Discount $\gamma$, damping $\lambda$ & 0.995, 0.99 \\
 Comfort factor $\kappa$, filter $\alpha$ & 1.8, 0.3 \\
 Batch $B$, iterations $I$ & 24 starts, 400 \\
+World models, weekend starts & WM-6 \& WM-5, 30\% \\
 Optimizer, learning rate & AdamW, $3\cdot10^{-4}$ \\
 \bottomrule
 \end{tabular}
@@ -325,7 +326,7 @@ The progression of the method is summarized in Figure~\ref{fig:progression} and 
 \centering
 \begin{minipage}[b]{0.585\linewidth}\centering
 \includegraphics[width=\linewidth]{figures/progression.pdf}
-\caption{Score of the PID baseline and of the stages of the method (policies on WM-1, WM-3 and twice on WM-4): 30 official scenarios over 14 days and Kaggle public leaderboard.}
+\caption{Score of the PID baseline and of the stages of the method (policies on WM-1, WM-3, twice on WM-4 and on WM-6 \& WM-5): 30 official scenarios over 14 days and Kaggle public leaderboard.}
 \label{fig:progression}
 \end{minipage}\hfill
 \begin{minipage}[b]{0.385\linewidth}\centering
@@ -335,25 +336,25 @@ The progression of the method is summarized in Figure~\ref{fig:progression} and 
 \end{minipage}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:progression}, the first entity-token policy trained by DPC already reduces the score of the PID baseline by 74\% (from 0.0591 to 0.0155), and every following stage reduces it further, down to 0.0106 ($-82\%$) for the final policy, which scores 0.013 on Kaggle against 0.019 for the first entity-token policy.
+As can be observed in Figure~\ref{fig:progression}, the first entity-token policy trained by DPC already reduces the score of the PID baseline by 74\% (from 0.0591 to 0.0155), and every following stage reduces it further, down to 0.0103 ($-83\%$) for the final policy, while the policy of the previous stage (0.0106) scores 0.013 on Kaggle against 0.019 for the first one.
 
-Indeed, Figure~\ref{fig:scenarios} shows that the final policy is better than the filtered policy trained on WM-3 in 23 of the 30 scenarios, with the largest reductions in the cold climates (Fairbanks 1 from 0.089 to 0.068, Fairbanks 8 from 0.046 to 0.027). Figure~\ref{fig:examples} compares the same two policies with the PID baseline in two heating scenarios with very different climates, Fairbanks 1 in January (outdoor air below $-35\,^{\circ}$C) and Denver 8 in November.
+Indeed, Figure~\ref{fig:scenarios} shows that the final policy is better than the filtered policy trained on WM-3 in 21 of the 30 scenarios, with the largest reductions in the cold climates (Fairbanks 1 from 0.089 to 0.064, Fairbanks 7 from 0.019 to 0.009, Fairbanks 8 from 0.046 to 0.028). Figure~\ref{fig:examples} compares the same two policies with the PID baseline in two heating scenarios with very different climates, Fairbanks 1 in January (outdoor air below $-35\,^{\circ}$C) and Denver 8 in November.
 
-\begin{figure}[H]
+\begin{figure}[!t]
 \centering
 \includegraphics[width=\linewidth]{figures/examples.pdf}
-\caption{First week of Fairbanks 1 (building 1, from 1 January) and Denver 8 (building 2, from 5 November): outdoor air, 10th percentile of the zone temperatures with the median heating setpoint (dashed) and gas power, for the PID baseline, the filtered policy on WM-3 and the final policy.}
+\caption{First week of Fairbanks 1 (from 1 January) and Denver 8 (from 5 November): outdoor air, 10th percentile of the zone temperatures with the median heating setpoint and gas power.}
 \label{fig:examples}
 \end{figure}
 
-As shown, the PID baseline keeps heating at night and over the weekend, yet, following the zone average of each air handler, it leaves the coldest zones below the setpoint for most of the occupancy (first-week score 0.2961 with 95.8~MWh of gas, against 0.0548 with 22.0~MWh for the final policy) and in Denver 8 also overheats part of the zones (0.0461 against 0.0121). Both learned policies, instead, switch the plant off at night and over the weekend and differ in the heat delivered during occupancy: in Fairbanks 1 the final policy heats more in the second half of each working day, keeping the coldest zones closer to the setpoint with 11\% more gas (first-week score from 0.0650 to 0.0548), and in Denver 8 its coldest zones reach the setpoint sooner after the morning start (from 0.0174 to 0.0121). Over the 30 scenarios, the comfort term is more than halved (from 0.0065 to 0.0026), while energy and carbon grow slightly (from 0.0074 to 0.0080).
+As shown, the PID baseline keeps heating at night and over the weekend, yet, following the zone average of each air handler, it leaves the coldest zones below the setpoint for most of the occupancy (first week: 0.2961 and 95.8~MWh of gas, against 0.0541 and 23.9~MWh) and in Denver 8 also overheats part of the zones (0.0461 against 0.0121). Both learned policies switch the plant off at night and on weekends, but in Fairbanks 1 the final policy keeps the coldest zones at the setpoint until the evening, with 21\% more gas (from 0.0650 to 0.0541), and resumes heating at low power on Saturday, whereas the filtered policy lets the building fall below $-5\,^{\circ}$C, and in Denver 8 its coldest zones reach the setpoint sooner after the start (from 0.0174 to 0.0121). Over the 30 scenarios, the comfort term falls to less than a third (from 0.0065 to 0.0021), while energy and carbon grow slightly (from 0.0074 to 0.0082).
 
 \subsection{World-Model Quality and Policy Quality}
 
-Table~\ref{tab:wm} relates the diagnostics of the five world models (1080 start states of 45 noise-free episodes on held-out buildings) to their policies.
+Table~\ref{tab:wm} relates the diagnostics of the six world models (1080 starts of 45 episodes on held-out buildings) to their policies.
 
-\begin{table}[H]
-\caption{World models (Section~\ref{sec:wm}) over 24-hour rollouts, with logged actions (Replay) or with the policy acting (Closed-Loop): temperature Mean Absolute Error (MAE), bias (predicted minus true), predicted to true comfort and energy, and 14-day policy score (WM-2: 7 days, Section~\ref{sec:horizon}).}
+\begin{table}[!t]
+\caption{World models (Section~\ref{sec:wm}) over 24-hour rollouts, with logged actions (Replay) or with the policy acting (Closed-Loop): temperature Mean Absolute Error (MAE) and bias, predicted to true comfort and energy, and 14-day policy score (WM-2: 7 days, Section~\ref{sec:horizon}).}
 \label{tab:wm}
 \centering
 \footnotesize
@@ -367,28 +368,33 @@ WM-1 & 1.38 & 1.13 & $+0.43$ & 0.96 & 0.95 & Entity-Token (6--12 h): 0.0155 \\
 WM-2 & 1.50 & 1.35 & $+1.07$ & 0.92 & 1.09 & -- \\
 WM-3 & 0.87 & 0.87 & $-0.18$ & 1.22 & 1.22 & Filter (6--12 h): 0.0139 \\
 WM-4 & 0.89 & 0.82 & $+0.06$ & 1.00 & 1.10 & Filter (6--12 h): 0.0133 \\
-    &      &      &         &      &      & Filter In Training (12--24 h): \textbf{0.0106} \\
+    &      &      &         &      &      & Filter In Training (12--24 h): 0.0106 \\
 WM-5 & 0.78 & 0.79 & $-0.01$ & 1.07 & 1.20 & Filter In Training (12--24 h): 0.0121 \\
+WM-6 & 0.79 & 0.79 & $+0.10$ & 1.08 & 1.19 & WM-6 \& WM-5 (12--24 h): \textbf{0.0103} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The memory and 24-hour unrolls of WM-3 cut the closed-loop error by about 35\% with respect to WM-2, and WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error, yet it yields a worse policy than WM-4 (0.0121 against 0.0106), since it overestimates the comfort term by 7\%, a bias amplified by $\kappa$, so that its policy overspends energy, especially in warm climates. This can primarily be attributed to the DPC gradient, which follows the predicted reward, so that a systematic reward bias steers the policy while random errors average out.
+The memory and 24-hour unrolls of WM-3 cut the closed-loop error by about 35\% with respect to WM-2, and WM-4 removes the temperature bias and the overestimation of discomfort (from 1.22 to 1.00). WM-5 has the lowest error, yet it yields a worse policy than WM-4 (0.0121 against 0.0106), since it overestimates the comfort term by 7\%, a bias amplified by $\kappa$, so that its policy overspends energy, especially in warm climates. This can be attributed to the DPC gradient, which follows the predicted reward, so that a systematic bias steers the policy while random errors average out.
 
 \subsection{Long Horizon and Command Filter}
 \label{sec:horizon}
 
-The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) requires both the 12 to 24-hour horizon and the filter inside the training rollouts, on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts do not reveal the benefit of acting earlier with slower commands. On the less accurate WM-2 (1.35 K, Table~\ref{tab:wm}) the long horizon instead degraded the 7-day score (from 0.0195 to 0.0328), the policy exploiting the accumulated errors.
+The largest gain after the first policy in Figure~\ref{fig:progression} (from 0.0133 to 0.0106) requires both the 12 to 24-hour horizon and the filter inside the rollouts, on an accurate world model: on WM-4, the filter inside rollouts of 6 to 12 hours yields 0.0182, against 0.0133 with the filter at deployment only, since short rollouts hide the benefit of acting earlier with slower commands. On the less accurate WM-2 (Table~\ref{tab:wm}) the long horizon instead degraded the 7-day score (from 0.0195 to 0.0328). On WM-6, a 24 to 48-hour horizon with $\gamma = 0.999$ yields 0.0104 in two of three seeds, against 0.0144 on WM-4, so that the useful horizon grows with the accuracy of the world model. The training seed weighs as much (a second seed of the final recipe scores 0.0345).
+
+\subsection{Remaining Headroom}
+\label{sec:headroom}
+
+To bound the gain of better short-term decisions, the final policy is run for 7 days under a receding-horizon oracle, which every hour clones the simulator, evaluates 31 modifications of the commands for the coming hour (plant forced off or on, offsets of the water, supply-air and reheat commands) over 12 hours, with the policy acting afterwards, and applies the best one. The oracle reduces the score by 32\% in Fairbanks 1 (from 0.0541 to 0.0368) and by 30\% in Denver 8 (from 0.0121 to 0.0085), but Phoenix 5 is near the bound (0.0149 against 0.0140). Scoring with WM-6 instead recovers half of the gap in Fairbanks 1 (0.0454) but worsens Phoenix 5 (0.0174), where the predicted gains lie within the model errors, whereas requiring the agreement of WM-6, WM-5 and WM-4 avoids the losses but gains little (0.0529, 0.0118 and 0.0145), and needs 13 to 33 s per decision.
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be obtained without deep reinforcement learning or imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 82\% and reaches 0.013 on Kaggle, with the calibration and accuracy of the world model as the main drivers of performance. The results are, however, sensitive to the training run (a second seed of the final recipe, with a slightly larger start-state pool, scores 0.0146 with an almost identical predicted return), so policies are selected in the simulator; future work will reduce this variance through ensembles of world models, whose first test (WM-4 and WM-5 alternated) already matches the final policy (0.0107), and through planning at deployment time.
+This work has shown that a single policy for unseen buildings can be obtained without reinforcement learning or imitation, by differentiating the competition reward through closed-loop rollouts of an entity-token world model, which reduces the score of the PID baseline by 83\%. Since an oracle with the true simulator still recovers about 30\% of the remaining loss in cold and mild climates, future work will address world models that predict the power of each zone coil and air handler, rather than only the building totals, so that heat goes only to the zones that need it, and their use for fast planning.
 
 \paragraph{Acknowledgments.} This work was carried out within the CREALab project (Italian Ministry of the Environment and Energy Security, MASE, Mission Innovation 2.0, MI\_FAE\_00326).
 
-\clearpage
-\renewcommand{\bibfont}{\small}
-\setlength{\bibsep}{2pt plus 0.5pt}
+\renewcommand{\bibfont}{\footnotesize}
+\setlength{\bibsep}{1pt plus 0.5pt}
 \bibliographystyle{plainnat}
 \bibliography{references}
 

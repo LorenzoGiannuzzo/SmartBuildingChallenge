@@ -49,6 +49,8 @@ def scores():
     d = json.loads(RES.read_text())
     out = collections.defaultdict(dict)
     for r in d:
+        if r["steps"] != 4032:
+            continue
         name = "pid_water" if r["policy"] == "pid_water" else Path(r["weights"]).stem
         scen = r["scenario"].split("training_scenarios/")[-1]
         out[name][scen] = abs(r["mean_reward"])
@@ -59,13 +61,14 @@ def fig_progression(s):
     #Lorenzo Giannuzzo: local 14-day score of each stage of the method next to
     #its Kaggle public leaderboard score, where one was submitted.
     stages = [("pid_water", "PID\nBaseline", None),
-              ("abl_A10", "Entity-Token\nPolicy", 0.019),
-              ("v10_base_f03", "+ Memory World\nModel, Filter", 0.018),
-              ("v11_base_f03", "+ Calibrated\nWorld Model", None),
-              ("v11_long_fit3", "+ 12-24 h Horizon,\nFilter In Training", 0.013)]
+              ("abl_A10", "Entity-\nToken\nPolicy", 0.019),
+              ("v10_base_f03", "+ Memory\nWorld Model,\nFilter", 0.018),
+              ("v11_base_f03", "+ Calibrated\nWorld\nModel", None),
+              ("v11_long_fit3", "+ 12-24 h\nHorizon, Filter\nIn Training", 0.013),
+              ("v14_new2wm", "+ 48 h World\nModel, Two\nWorld Models", None)]
     local = [np.mean(list(s[k].values())) for k, _, _ in stages]
     x = np.arange(len(stages))
-    fig, ax = plt.subplots(figsize=(4.6, 2.45))
+    fig, ax = plt.subplots(figsize=(5.2, 2.45))
     w = 0.38
     b1 = ax.bar(x - w / 2, local, w, color=C_NEW, label="Local, 30 Scenarios, 14 Days")
     kag = [k for _, _, k in stages]
@@ -75,7 +78,7 @@ def fig_progression(s):
         for b in bars:
             ax.text(b.get_x() + b.get_width() / 2, b.get_height() + 0.0008, f"{b.get_height():.4f}".rstrip("0"),
                     ha="center", va="bottom", fontsize=7)
-    ax.set_xticks(x, [lab for _, lab, _ in stages])
+    ax.set_xticks(x, [lab for _, lab, _ in stages], fontsize=7)
     ax.set_ylabel("Mean Absolute Step Reward [-]")
     ax.set_ylim(0, 0.068)
     ax.grid(axis="y", lw=0.4, alpha=0.5)
@@ -88,7 +91,7 @@ def fig_progression(s):
 
 
 def fig_scenarios(s):
-    a, b = s["v10_base_f03"], s["v11_long_fit3"]
+    a, b = s["v10_base_f03"], s["v14_new2wm"]
     fig, ax = plt.subplots(figsize=(2.75, 2.65))
     for c, name in CLIMATES.items():
         keys = [k for k in a if f"/{c}_" in k]
@@ -101,7 +104,7 @@ def fig_scenarios(s):
     ax.set_xlim(lim)
     ax.set_ylim(lim)
     ax.set_xlabel("Memory World Model, Filter [-]")
-    ax.set_ylabel("12-24 h Horizon, Filter In Training [-]")
+    ax.set_ylabel("Final Policy [-]")
     ax.grid(lw=0.4, alpha=0.5, which="major")
     ax.set_axisbelow(True)
     legend_top(ax, ncol=3, y=1.01)
@@ -116,15 +119,15 @@ def fig_examples():
     #PID baseline and the same two policies, shared legend above the two columns.
     names = {"pid_water": ("PID With Water Reset", C_KAGGLE),
              "v10_base_f03": ("Memory World Model, Filter", C_OLD),
-             "v11_long_fit3": ("12-24 h Horizon, Filter In Training", C_NEW)}
+             "v14_new2wm": ("Final Policy", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 3.4), sharex="col",
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.75), sharex="col",
                              gridspec_kw={"height_ratios": [0.8, 1.35, 0.95]})
     out = {}
     for c, (scen, title) in enumerate(cases):
         recs = {k: np.load(REC / f"{scen}__{k}.npz", allow_pickle=True) for k in names}
-        d0 = recs["v11_long_fit3"]
+        d0 = recs["v14_new2wm"]
         #Lorenzo Giannuzzo: hours since midnight of the start day, so that the
         #ticks fall on real clock times (the recordings start at 06:00).
         start_h = float(str(d0["start"]).split()[1].split(":")[0])
