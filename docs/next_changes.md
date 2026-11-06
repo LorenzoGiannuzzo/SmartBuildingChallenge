@@ -122,3 +122,12 @@ implemented together with the next model change.
 - Round: collection (on-policy v14_new2wm with probes, Fairbanks folders,
   clean diagnosis runs), WM v15 from v14, diagnosis and figures for v14/v15,
   policies on v15 (24 h with v14, 48 h), evaluation, control figures.
+
+## Paper state (Fri 6 Nov, evening)
+- 8 pages, References on a new page; floats [H] right after first mention.
+- Figures from paper/make_paper_figures.py: impact (Fig 2: blue/light-blue bars, dark-red Kaggle, blue-red heatmap vmin 0.1 vmax 0.45),
+  examples (Fig 3, markers 1 PID night, 2 PID below setpoint Denver, 3 filtered below -5C, 4 final restart Sat),
+  analysis (Fig 4: seeds + per-climate calibration WM-1/2/3 = wm_v11/v12/v14), headroom (Fig 5, relative to final policy, Fig 4 colors).
+- Paper WM naming: WM-1 = wm_v11, WM-2 = wm_v12, WM-3 = wm_v14; earlier models unnamed. Kaggle ratios 1.23, 1.29, 1.23, 1.32 (v13 = 0.01408).
+- Acknowledgments: "To be completed." Authors: Giannuzzo, Schiera.
+- Monday: add weekend results (wm15 structured WM, v15w policies, 30-day eval, planner v15) if they improve; multi-seed ablation later.
