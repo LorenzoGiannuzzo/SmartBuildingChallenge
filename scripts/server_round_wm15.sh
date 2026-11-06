@@ -15,8 +15,9 @@
 #      the batches from the new data;
 #   3. diagnosis: official diagnosis (v14 and v15), error figures with the
 #      hourly power profiles and the component ratios for v14 and v15;
-#   4. policies on world model v15, two batches: recipe of v14_new2wm (v15 and
-#      v14, 24 h) seeds 0-2, 48 h on v15 seeds 0-1; 14-day evaluation;
+#   4. policies on world model v15, first batch: recipe of v14_new2wm (v15 and
+#      v14, 24 h) seeds 0-1, 48 h on v15 seed 0; 14-day evaluation (the second
+#      batch runs in scripts/server_sunday.sh, the server being busy on Saturday);
 #   5. control figures of the best policy.
 source "$(dirname "$0")/server_env.sh"
 mkdir -p logs
@@ -115,7 +116,6 @@ run_batch() {
     done
 }
 run_batch "${BATCH1[@]}"
-run_batch "${BATCH2[@]}"
 
 # 5. control figures of the best policy
 ALL=()
