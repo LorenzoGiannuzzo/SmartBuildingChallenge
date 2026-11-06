@@ -51,7 +51,7 @@ STAGES = [("pid_water", "PID\nBaseline", None),
           ("v11_base_f03", "+ Calibrated\nWorld Model", None),
           ("v11_long_fit3", "+ 12-24 h Horizon\n& Filter In\nTraining", 0.013),
           ("v14_new2wm", "+ 48 h World\nModel & Two\nWorld Models", None)]
-C_COMFORT, C_ENERGY = "#1b5e20", "#66bb6a"
+C_COMFORT, C_ENERGY = "#0d2c54", "#8ecae6"
 
 
 def scores(key="mean_reward"):
@@ -84,11 +84,11 @@ def fig_impact():
     for i, t in enumerate(total):
         ax.text(x[i], t + 0.0012, f"{t:.4f}", ha="center", va="bottom", fontsize=7)
     kx = [i for i, (_, _, k) in enumerate(STAGES) if k]
-    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color="#2166ac",
+    hk = ax.scatter([x[i] + 0.36 for i in kx], [STAGES[i][2] for i in kx], marker="D", s=16, color="#f57c00",
                     edgecolor="black", lw=0.4, zorder=4, label="Kaggle Public Leaderboard")
     for i in kx:
         ax.text(x[i] + 0.36, STAGES[i][2] + 0.0022, f"{STAGES[i][2]:.3f}", ha="center", va="bottom", fontsize=6.5,
-                color="#2166ac")
+                color="#f57c00")
     ax.set_ylabel("Mean Absolute Step\nReward [-]")
     ax.set_ylim(0, 0.068)
     ax.set_xlim(-0.5, len(keys) - 0.5)
@@ -146,7 +146,7 @@ def fig_analysis():
                ("World\nModels\n3 & 2\n12-24 h", ["v14_new2wm", "v16_k18_s1"])]
     wms = [("wm_v11", "World Model 1", C_OLD), ("wm_v12", "World Model 2", C_KAGGLE),
            ("wm_v14", "World Model 3", C_NEW)]
-    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.05), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.42), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
     ax = axes[0]
     for i, (lab, ks) in enumerate(recipes):
         v = [mean[k] for k in ks]
@@ -207,7 +207,7 @@ def fig_headroom():
     series = [("Oracle With Simulator", "#7b2d8e", [orc[s] / base[s] for s, _ in scen]),
               ("Planner With World Model 3", "#ff8c00", [pl[("naive", s)] / base[s] for s, _ in scen]),
               ("Planner With World Models 1-3", "#2166ac", [pl[("safe", s)] / base[s] for s, _ in scen])]
-    fig, ax = plt.subplots(figsize=(5.6, 1.35))
+    fig, ax = plt.subplots(figsize=(5.6, 1.25))
     w = 0.24
     for j, (lab, col, v) in enumerate(series):
         bars = ax.bar(np.arange(len(scen)) + (j - 1) * w, v, w, color=col, edgecolor="black", lw=0.4, label=lab)
