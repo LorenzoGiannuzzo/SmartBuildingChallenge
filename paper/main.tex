@@ -49,7 +49,7 @@
 \maketitle
 
 \begin{abstract}
-A single controller for the Heating, Ventilation and Air Conditioning (HVAC) systems of unseen buildings has to cope with different numbers of zones and air handlers, different thermal properties and climates ranging from subarctic winters to tropical summers. This work addresses the Smart Buildings Challenge by representing every zone, air handler and hot-water system as a token of the same transformer architecture, used both for a world model of the building and for the policy, and by training the policy with Differentiable Predictive Control (DPC), that is, by backpropagating the competition reward through closed-loop rollouts of 12 to 48 hours inside world models refined in on-policy rounds. On the 30 official scenarios over 14 days, the score of the Proportional-Integral-Derivative (PID) baseline falls from 0.0591 to 0.0103, mostly through a lower discomfort, and an earlier policy reaches 0.013 on the Kaggle public leaderboard. The analysis shows that the remaining loss is concentrated in the subarctic climate, that the differences between the most accurate world models are smaller than the spread between training seeds, and that a receding-horizon search with the true simulator still recovers about 30\% of the loss in a cold and a mild scenario.
+A single controller for the Heating, Ventilation and Air Conditioning (HVAC) systems of unseen buildings has to cope with different numbers of zones and air handlers, thermal properties and climates. This work addresses the Smart Buildings Challenge by representing every zone, air handler and hot-water system as a token of the same transformer architecture, used for both a world model of the building and the policy, and by training the policy with Differentiable Predictive Control (DPC), that is, by backpropagating the competition reward through closed-loop rollouts of 12 to 48 hours inside world models refined in on-policy rounds. On the 30 official scenarios over 14 days, the score of the Proportional-Integral-Derivative (PID) baseline falls from 0.0591 to 0.0103, mostly through a lower discomfort, and an earlier policy reaches 0.013 on the Kaggle public leaderboard. The analysis shows that the remaining loss is concentrated in the subarctic climate, that the most accurate world models differ less than the training seeds, and that a search with the true simulator still recovers about 30\% of the loss in a cold and a mild scenario.
 \end{abstract}
 
 \section{Introduction}
@@ -65,7 +65,7 @@ The approach presented here describes the building as a set of entities (zones, 
 
 \begin{figure}[H]
 \centering
-\resizebox{0.8\linewidth}{!}{%
+\resizebox{0.86\linewidth}{!}{%
 \begin{tikzpicture}[
   font=\scriptsize,
   box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=white},
@@ -172,12 +172,12 @@ Differentiable MPC \cite{amos2018diffmpc} embeds an optimization problem in a po
 
 \subsection{Problem Setting}
 
-At every 5-minute step $t$, the policy receives the observation $o_t$ of a building with $V$ zones and $K$ air handlers, with the measurements of every zone, air handler and hot-water system, the comfort flags, the occupancy and the time, and returns the action $a_t$, made of the damper and reheat commands of every zone and of the run states and setpoints of every air handler and of the hot-water system. The step reward combines occupant comfort, energy cost and carbon emissions as follows:
+At every 5-minute step $t$, the policy receives the observation $o_t$ of a building with $V$ zones and $K$ air handlers, with the measurements of every entity, the comfort flags, the occupancy and the time, and returns the action $a_t$, made of the damper and reheat commands of every zone and of the run states and setpoints of every air handler and of the hot-water system. The step reward combines occupant comfort, energy cost and carbon emissions as follows:
 \begin{equation}
 r_t = w_p\, R_t - w_e\, E_t - w_c\, C_t ,
 \label{eq:reward}
 \end{equation}
-where $w_p$, $w_e$ and $w_c$ are the weights fixed by the competition, $E_t$ and $C_t$ are the energy cost and the carbon emissions of electricity and natural gas, each normalized by a reference value, and $R_t \le 0$ is the productivity regret of the occupants, equal to zero when the building is unoccupied and otherwise defined as:
+where $w_p = 0.6$, $w_e = 0.2$ and $w_c = 0.2$ are the weights fixed by the competition, $E_t$ and $C_t$ are the energy cost and the carbon emissions of electricity and natural gas, each normalized by a reference value, and $R_t \le 0$ is the productivity regret of the occupants, equal to zero when the building is unoccupied and otherwise defined as:
 \begin{equation}
 R_t = -\frac{p_{\max}}{p_{\max} - p_{\min}} \, \frac{\sum_v n_{v,t}\, \psi(\delta_{v,t})}{\sum_v n_{v,t}}, \qquad \delta_{v,t} = \max\big(T_{v,t} - \overline{T}_{v,t},\; \underline{T}_{v,t} - T_{v,t},\; 0\big),
 \label{eq:regret}
@@ -225,7 +225,7 @@ The model is trained on closed-loop unrolls of $U \in \{48, 144, 288\}$ steps (4
 \mathcal{L}(\phi) = \frac{1}{U} \sum_{k=1}^{U} \Big( \frac{\sum_v \omega_{v,k}\, (\hat{T}_{v,k} - T_{v,k})^2}{\sigma_{\Delta T}^2 \sum_v \omega_{v,k}} + \mu_R \Big(\frac{\hat{R}_k - R_k}{\sigma_R}\Big)^2 + \mu_s\, \mathcal{L}^{\mathrm{sens}}_k + \mu_P\, \big\| \hat{p}_k - p_k \big\|^2 \Big),
 \label{eq:wmloss}
 \end{equation}
-where $k$ counts the steps of the unroll, the weight $\omega_{v,k}$ equals 4 for occupied zones outside the band or less than 1 K from its edges and 1 otherwise, thereby emphasizing the states in which the reward is sensitive to temperature errors, the second term matches the regret (\ref{eq:regret}) directly, with $\sigma_R = 0.1$, $\mathcal{L}^{\mathrm{sens}}_k$ the error on normalized readbacks and sensors, $p_k$ the electric and gas power normalized by $K P^{\mathrm{el}}_0$ and $K P^{\mathrm{gas}}_0$, and $\mu_R$, $\mu_s$, $\mu_P$ the weights in Table~\ref{tab:hyper}.
+where $k$ counts the steps of the unroll, the weight $\omega_{v,k}$ equals 4 for occupied zones outside the band or less than 1 K from its edges and 1 otherwise, thereby emphasizing the states in which the reward is sensitive, the second term matches the regret (\ref{eq:regret}) directly, with $\sigma_R = 0.1$, $\mathcal{L}^{\mathrm{sens}}_k$ the error on normalized readbacks and sensors, $p_k$ the electric and gas power normalized by $K P^{\mathrm{el}}_0$ and $K P^{\mathrm{gas}}_0$, and $\mu_R$, $\mu_s$, $\mu_P$ the weights in Table~\ref{tab:hyper}.
 
 \begin{table}[H]
 \caption{Architecture and training settings of the world model and of the final policy.}
@@ -308,7 +308,7 @@ where $\mathrm{sg}(\cdot)$ is the stop-gradient operator and $\lambda < 1$ the d
 \tilde{u}_t = \alpha\, u_t + (1 - \alpha)\, \tilde{u}_{t-1},
 \label{eq:filter}
 \end{equation}
-where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command applied to the building and $\alpha \in (0, 1]$ the filter coefficient; on/off commands are not filtered, and the policy receives $\tilde{u}_{t-1}$ as its previous action, exactly as at deployment. The intermediate policies of Section~\ref{sec:results} apply the filter only at deployment (Filter), the final one also inside the rollouts (Filter In Training). Third, the horizon grows from 12 to 24 hours (from 6 to 12 in the intermediate policies), long enough to experience preheating and the overnight drift. In the final policy, every DPC iteration draws one of two world models (WM-3 and WM-2), so that the policy cannot exploit the errors of a single model, the policy also receives the averages (\ref{eq:memory}) of its zones and a holiday flag, and 30\% of the start states fall on Fridays and Saturdays, to represent the weekend and the following start-up. Every policy after the first is warm-started from an entity-token policy trained on an earlier world model.
+where $u_t$ is the command produced by the policy, $\tilde{u}_t$ the command applied to the building and $\alpha \in (0, 1]$ the filter coefficient; on/off commands are not filtered, and the policy receives $\tilde{u}_{t-1}$ as its previous action. The intermediate policies of Section~\ref{sec:results} apply the filter only at deployment (Filter), the final one also inside the rollouts (Filter In Training). Third, the horizon grows from 12 to 24 hours (from 6 to 12 in the intermediate policies), long enough to experience preheating and the overnight drift. In the final policy, every DPC iteration draws one of two world models (WM-3 and WM-2), so that the policy cannot exploit the errors of a single model, the policy also receives the averages (\ref{eq:memory}) of its zones and a holiday flag, and 30\% of the start states fall on Fridays and Saturdays, to represent the weekend and the following start-up. Every policy after the first is warm-started from an entity-token policy trained on an earlier world model.
 
 
 
@@ -329,7 +329,7 @@ Policies are evaluated in the simulator over 14 days, so as to include a weekend
 \subsection{Where the Gains Come From}
 \label{sec:impact}
 
-As can be observed in Figure~\ref{fig:impact}, the first entity-token policy already removes 74\% of the PID score, reducing both terms in every climate. The following stages act on different terms and climates, since the world model with thermal memory and the command filter mainly benefit the warm climates (Singapore and Phoenix), the calibrated world model the cold ones (Fairbanks and Denver) at the expense of Singapore, and the 12 to 24-hour horizon with the filter inside the training rollouts more than halves the comfort term at almost equal energy, thereby improving every climate. Indeed, the filter alone, in rollouts of 6 to 12 hours, worsens the score (0.0182 against 0.0133). The final policy, trained on two alternated world models, lowers the comfort term further (to 0.0021) and reaches 0.0103 ($-83\%$), while the six Fairbanks scenarios still account for about 40\% of its loss.
+As can be observed in Figure~\ref{fig:impact}, the first entity-token policy already removes 74\% of the PID score, reducing both terms in every climate. The following stages act on different terms and climates, since the world model with thermal memory and the command filter mainly benefit the warm climates (Singapore and Phoenix), the calibrated world model the cold ones (Fairbanks and Denver) at the expense of Singapore, and the 12 to 24-hour horizon with the filter inside the training rollouts more than halves the comfort term at almost equal energy, thereby improving every climate. Indeed, the filter alone, in rollouts of 6 to 12 hours, worsens the score (0.0182 against 0.0133). The final policy, which adds two alternated world models, the zone memory, a holiday flag and more weekend starts, lowers the comfort term further (to 0.0021) and reaches 0.0103 ($-83\%$), while the six Fairbanks scenarios still account for about 40\% of its loss.
 
 \subsection{Learned Behavior}
 \label{sec:behavior}
@@ -348,7 +348,7 @@ As shown, the PID baseline heats all night (marker 1), with 95.8~MWh of gas in t
 \subsection{World Models and Training Seeds}
 \label{sec:wmseeds}
 
-The three world models of Figure~\ref{fig:analysis} reach similar errors over 24-hour closed-loop rollouts on held-out buildings (0.82, 0.79 and 0.79~K for WM-1, WM-2 and WM-3).
+The three world models of Figure~\ref{fig:analysis} reach similar temperature errors over 24-hour closed-loop rollouts on held-out buildings (0.82, 0.79 and 0.79~K for WM-1, WM-2 and WM-3).
 
 \begin{figure}[H]
 \centering
@@ -357,26 +357,26 @@ The three world models of Figure~\ref{fig:analysis} reach similar errors over 24
 \label{fig:analysis}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:analysis}(a), the training seed weighs as much as the choice of world model, since the recipe of the final policy scores 0.0103 with one seed and 0.0345 with another, and the recipe on WM-3 with a 24 to 48-hour horizon and $\gamma = 0.999$ yields 0.0104 in two of three seeds. Figures~\ref{fig:analysis}(b) and (c) show that all three world models underestimate the discomfort by about half in Phoenix and Singapore and overestimate it by more than 40\% in Fairbanks, while they overestimate the energy, especially in Atlanta and Phoenix, so that their aggregate calibration on comfort (1.00 to 1.08) hides opposite errors across climates, which a single comfort factor $\kappa$ cannot compensate. The policy on WM-2 is worse than that on WM-1 (0.0121 against 0.0106), mainly in the warm climates, yet WM-3, with similar errors, yields the best policies, so that these world models differ less than the seeds.
+As can be observed in Figure~\ref{fig:analysis}(a), the training seed weighs as much as the choice of world model, since the recipe of the final policy scores 0.0103 with one seed and 0.0345 with another, and that on WM-3 with a 24 to 48-hour horizon yields 0.0104 in two of three seeds. Figures~\ref{fig:analysis}(b) and (c) show that all three world models underestimate the discomfort by about half in Phoenix and Singapore, overestimate it by more than 40\% in Fairbanks and overestimate the energy, especially in Atlanta and Phoenix, so that their aggregate calibration on comfort (1.00 to 1.08) hides opposite errors that a single comfort factor $\kappa$ cannot compensate. The policy on WM-2 is worse than on WM-1 (0.0121 against 0.0106), yet WM-3, with similar errors, yields the best ones, so that seeds matter more.
 
 \subsection{Remaining Headroom}
 \label{sec:headroom}
 
 
-To bound the gain of better hourly decisions, an oracle clones the simulator every hour, evaluates 31 modifications of the next-hour commands of the final policy (plant off or on, water, supply-air and reheat offsets) over 24 hours and applies the best one, as compared in Figure~\ref{fig:headroom} over 7 days with the same search scored by world models.
+To bound the gain of better hourly decisions, an oracle clones the simulator every hour, scores 31 modifications of the next-hour commands of the final policy (plant on or off, water, supply-air and reheat offsets) over 24 hours and applies the best, as compared in Figure~\ref{fig:headroom} with world-model scoring.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{figures/headroom.pdf}
+\includegraphics[width=0.8\linewidth]{figures/headroom.pdf}
 \caption{Seven-day score of the oracle and of the planners, relative to the final policy.}
 \label{fig:headroom}
 \end{figure}
 
- As can be observed, the oracle reduces the score by about 30\% in Fairbanks 1 and Denver 8 but barely in Phoenix 5, while the search scored by WM-3 recovers half of the gap in Fairbanks 1 but worsens Phoenix 5, and the agreement of the three world models avoids the losses but gains little; each decision, moreover, takes 13 to 33~s against less than 1.5~s on Kaggle.
+ As can be observed, the oracle reduces the score by about 30\% in Fairbanks 1 and Denver 8 and by 7\% in Phoenix 5, while the search scored by WM-3 recovers half of the gap in Fairbanks 1 but worsens Phoenix 5, and the agreement of three world models avoids losses but gains little, at 13 to 33~s per decision, beyond the Kaggle budget.
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be trained by differentiating the reward through entity-token world-model rollouts, reducing the PID score by 83\%. Since the remaining loss is mostly subarctic and an oracle still recovers about 30\% of it in two scenarios, future work will model the power of each zone coil and air handler, to heat only where needed.
+This work has shown that a single policy for unseen buildings can be trained through entity-token world-model rollouts, reducing the PID score by 83\%. Since the remaining loss is mostly subarctic and an oracle still recovers about 30\% of it in two scenarios, future work will model the power of each zone coil, to heat only where needed.
 
 \paragraph{Acknowledgments.} To be completed.
 

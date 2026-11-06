@@ -50,7 +50,7 @@ STAGES = [("pid_water", "PID\nBaseline", None),
           ("v10_base_f03", "+ Memory\nWorld Model\n& Filter", 0.018),
           ("v11_base_f03", "+ Calibrated\nWorld Model", None),
           ("v11_long_fit3", "+ 12-24 h Horizon\n& Filter In\nTraining", 0.013),
-          ("v14_new2wm", "+ 48 h World\nModel & Two\nWorld Models", None)]
+          ("v14_new2wm", "+ Two World\nModels & Policy\nMemory", None)]
 C_COMFORT, C_ENERGY = "#0d2c54", "#8ecae6"
 
 
@@ -208,7 +208,7 @@ def fig_headroom():
     series = [("Oracle With Simulator", C_OLD, [orc[s] / base[s] for s, _ in scen]),
               ("Planner With World Model 3", C_KAGGLE, [pl[("naive", s)] / base[s] for s, _ in scen]),
               ("Planner With World Models 1-3", C_NEW, [pl[("safe", s)] / base[s] for s, _ in scen])]
-    fig, ax = plt.subplots(figsize=(5.6, 1.25))
+    fig, ax = plt.subplots(figsize=(4.6, 1.72))
     w = 0.24
     for j, (lab, col, v) in enumerate(series):
         bars = ax.bar(np.arange(len(scen)) + (j - 1) * w, v, w, color=col, edgecolor="black", lw=0.4, label=lab)
@@ -222,7 +222,7 @@ def fig_headroom():
     ax.set_yticks([0, 0.5, 1.0])
     ax.grid(axis="y", lw=0.4, alpha=0.5)
     ax.set_axisbelow(True)
-    leg = legend_top(ax, ncol=4, y=1.02)
+    leg = legend_top(ax, ncol=2, y=1.02)
     for t in leg.get_texts():
         t.set_fontsize(6.5)
     fig.tight_layout()
