@@ -37,10 +37,14 @@ class Recorder:
 
     KEYS = ("act_c", "act_d", "zone_temp", "zone_hsp", "zone_csp", "zone_flow", "zone_flow_sp", "zone_occ",
             "blower_w", "ac_w", "gas_w", "pump_w", "elec_cost_w", "gas_cost_w", "elec_co2_w", "gas_co2_w",
-            "reward", "regret", "norm_energy", "norm_carbon", "t_start", "mode")
+            "reward", "regret", "norm_energy", "norm_carbon", "t_start", "mode",
+            "zone_reheat_w", "ahu_fan_w", "ahu_cool_w", "boiler_loss_w")
 
     def __init__(self, env, schema):
+        from sbwm.components import ComponentProbe
+
         self.schema = schema
+        self.probe = ComponentProbe(env, schema)
         self.rec = {k: [] for k in self.KEYS}
         self.obs = []
         rf = env.reward_function
@@ -81,6 +85,8 @@ class Recorder:
         r["act_c"].append(c)
         r["act_d"].append(d)
         r["mode"].append(0)
+        for k, x in self.probe.read().items():
+            r[k].append(x)
 
     def episode(self, scenario: Path, start: str, meta):
         from sbwm.geometry import zone_static_features

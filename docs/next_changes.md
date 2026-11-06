@@ -104,3 +104,21 @@ implemented together with the next model change.
 - Next, depending on the gap: planning at deployment with the world model
   (gradient refinement of the policy commands every hour), then online
   correction of the world model per building.
+
+## Round wm15: structured power (scripts/server_round_wm15.sh)
+
+- `sbwm/components.py` reads, during collection, the power of every device:
+  zone reheat coils, AHU fans and cooling, boiler tank losses (the tank term is
+  the rest of the gas). Checked on Fairbanks 1: AHU parts sum to the reward
+  totals exactly, and in steady heating the gas equals the sum of the coils.
+- World model `--structured`: zone tokens predict their coil heat, AHU tokens
+  fans and cooling, the HWS token pump, losses and tank; gas and electricity
+  are the sums. Component losses in the units of the totals, plus
+  `--w-hourly` (error of the hourly mean power). World model v14, started as a
+  structured model, puts most of the gas in the HWS standby term (coils 0.12 of
+  the true heat, losses 200 times): the totals were right for the wrong reason.
+- Diagnosis figure `sbwm/wm_error_plots.py`: hourly power profiles and
+  component ratios (pred/true) next to the temperature error.
+- Round: collection (on-policy v14_new2wm with probes, Fairbanks folders,
+  clean diagnosis runs), WM v15 from v14, diagnosis and figures for v14/v15,
+  policies on v15 (24 h with v14, 48 h), evaluation, control figures.

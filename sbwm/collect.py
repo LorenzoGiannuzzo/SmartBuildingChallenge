@@ -216,6 +216,12 @@ def _run_episode(job: dict) -> str:
     elec_model = reward_fn._electricity_energy_cost
     gas_model = reward_fn._natural_gas_energy_cost
 
+    #Lorenzo Giannuzzo: power components device by device (zone reheat, AHU fans
+    #and cooling, boiler losses) for the structured power heads of the world model.
+    from sbwm.components import ComponentProbe
+
+    probe = ComponentProbe(env, schema)
+    comp = {k: [] for k in ("zone_reheat_w", "ahu_fan_w", "ahu_cool_w", "boiler_loss_w")}
     T, V = job["steps"], schema.num_zones
     obs, _ = env.reset()
     rec = {k: [] for k in (
@@ -259,11 +265,14 @@ def _run_episode(job: dict) -> str:
         rec["act_c"].append(c)
         rec["act_d"].append(d)
         rec["mode"].append(mode)
+        for k, x in probe.read().items():
+            comp[k].append(x)
         obs_list.append(np.asarray(obs, np.float32))
         if terminated or truncated:
             break
 
     arrays = {k: np.asarray(v) for k, v in rec.items()}
+    arrays.update({k: np.asarray(v, np.float32) for k, v in comp.items()})
     for k, v in arrays.items():
         if v.dtype == np.float64:
             arrays[k] = v.astype(np.float32)

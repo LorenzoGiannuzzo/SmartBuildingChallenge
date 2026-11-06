@@ -40,7 +40,7 @@ def predict(net, model, norm, ep, starts, horizon, closed: bool):
     ro = Rollout(model, norm, ep)
     t0 = torch.as_tensor(starts, dtype=torch.long)
     state = ro.init_state(t0)
-    temps, powers = [], []
+    temps, powers, comps = [], [], []
     k = ep.schema.num_ahus
     for i in range(horizon):
         t = t0 + i
@@ -54,7 +54,31 @@ def predict(net, model, norm, ep, starts, horizon, closed: bool):
         temps.append(new_temp)
         p = out["power"]
         powers.append(torch.stack([p[..., 0] * 80000.0 * k, p[..., 1] * 205000.0 * k], -1))
+        if "comp" in out:
+            c = out["comp"]
+            comps.append(torch.stack([c["reheat"].sum(-1) * 205000.0, c["fan"].sum(-1) * 80000.0,
+                                      c["cool"].sum(-1) * 80000.0, c["pump"] * 80000.0, c["loss"] * 205000.0,
+                                      c["tank"] * 205000.0], -1))
+    predict.last_comp = torch.stack(comps, 1).numpy() if comps else None
     return torch.stack(temps, 1).numpy(), torch.stack(powers, 1).numpy()
+
+
+COMP_NAMES = ("reheat", "fan", "cool", "pump", "loss", "tank")
+
+
+def true_components(ep):
+    """Simulated components (T, 6) [W], or None for episodes collected without them."""
+    if ep.comp is None:
+        return None
+    c = ep.comp
+    return np.stack([c["reheat"].sum(-1).numpy() * 205000.0, c["fan"].sum(-1).numpy() * 80000.0,
+                     c["cool"].sum(-1).numpy() * 80000.0, c["pump"].numpy() * 80000.0,
+                     c["loss"].numpy() * 205000.0, c["tank"].numpy() * 205000.0], -1)
+
+
+def hour_of_day(ep) -> np.ndarray:
+    g = ep.gobs.numpy()
+    return (np.mod(np.arctan2(g[:, 3], g[:, 4]), 2 * np.pi) * 24 / (2 * np.pi)).astype(int) % 24
 
 
 def true_power(ep):
@@ -92,6 +116,8 @@ def main():
     fig, axes = plt.subplots(n, 3, figsize=(13, 2.9 * n), gridspec_kw={"width_ratios": [2.2, 2.2, 1]},
                              squeeze=False)
     summary = {}
+    fig2, axes2 = plt.subplots(n, 2, figsize=(9, 2.6 * n), squeeze=False)
+    report = {}
     for row, sc in enumerate(args.scenarios):
         scen = Path(args.root) / sc
         f = cache / (sc.replace("/", "__") + f"__{Path(args.weights).stem}__{args.steps}.npz")
@@ -130,9 +156,35 @@ def main():
                           label=lab if j == 0 else None)
                 ax_p.plot(hh, pp[j, :, heat] / 1000.0, color=COL[mode], lw=0.6, alpha=0.6,
                           label=lab if j == 0 else None)
+            idx = starts[:, None] + np.arange(args.horizon)
+            hod = hour_of_day(ep)[idx]
+            for col, lab2 in ((0, "Electric"), (1, "Natural Gas")):
+                prof_p = np.array([pp[..., col][hod == h].mean() if (hod == h).any() else np.nan for h in range(24)])
+                prof_t = np.array([true_p[idx][..., col][hod == h].mean() if (hod == h).any() else np.nan
+                                   for h in range(24)])
+                ax2 = axes2[row, col]
+                if mode == "replay":
+                    ax2.plot(range(24), prof_t / 1000.0, color=COL["truth"], lw=1.2, marker="o", ms=2.5,
+                             label="Simulator (Truth)")
+                ax2.plot(range(24), prof_p / 1000.0, color=COL[mode], lw=1.2, marker="o", ms=2.5,
+                         label="World Model, Replayed Actions" if mode == "replay" else "World Model, Policy In The Loop")
+                ax2.set_ylabel(f"{sc.split('/')[-1].replace('_', ' ').title()}\n{lab2} Power [kW]" if col == 0
+                               else f"{lab2} Power [kW]")
+                ax2.set_xticks(range(0, 24, 3))
+                ax2.grid(lw=0.4, alpha=0.5)
+                if row == n - 1:
+                    ax2.set_xlabel("Hour Of The Day [h]")
+                report.setdefault(sc, {})[f"{mode}_{lab2.lower().replace(' ', '_')}_ratio"] = float(
+                    pp[..., col].sum() / max(true_p[idx][..., col].sum(), 1e-9))
+            tc = true_components(ep)
+            if mode == "replay" and tc is not None and predict.last_comp is not None:
+                pc = predict.last_comp
+                report[sc]["components_pred_over_true"] = {
+                    nm: float(pc[..., i].sum() / tc[idx][..., i].sum()) if abs(tc[idx][..., i].sum()) > 1e-6 else None
+                    for i, nm in enumerate(COMP_NAMES)}
             err = np.abs(pt - ep.temp.numpy()[starts[:, None] + np.arange(args.horizon)]).mean((0, 2))
             ax_e.plot(np.arange(1, args.horizon + 1) / 12.0, err, color=COL[mode], lw=1.2)
-            summary[(sc, mode)] = {h: float(err[h * 12 - 1]) for h in (1, 6, 12, 24)}
+            summary[(sc, mode)] = {h: float(err[h * 12 - 1]) for h in (1, 6, 12, 24) if h * 12 <= len(err)}
         name = sc.split("/")[-1].replace("_", " ").title()
         ax_t.set_ylabel(f"{name}\nZone Temperature,\n10th Percentile [°C]")
         ax_p.set_ylabel(("Natural Gas" if heat else "Electric") + " Power [kW]")
@@ -157,6 +209,17 @@ def main():
     fig.savefig(out, dpi=170)
     for (sc, mode), v in summary.items():
         print(sc, mode, {k: round(x, 2) for k, x in v.items()})
+    h2, l2 = axes2[0, 0].get_legend_handles_labels()
+    fig2.legend(h2, l2, loc="lower center", ncol=3, bbox_to_anchor=(0.5, 1 - 0.35 / (2.6 * n)), frameon=True,
+                fancybox=False, edgecolor="black", fontsize=8)
+    fig2.tight_layout(rect=(0, 0, 1, 1 - 0.5 / (2.6 * n)))
+    fig2.savefig(out.with_name(out.stem + "_profile.png"), dpi=170)
+    import json
+
+    for sc in report:
+        report[sc]["temp_mae"] = {mode: summary[(sc, mode)] for mode in ("replay", "closed")}
+    out.with_suffix(".json").write_text(json.dumps(report, indent=1))
+    print(json.dumps(report, indent=1))
 
 
 def _save(rec, scen, start, path):

@@ -117,9 +117,17 @@ def update_memory(mem: torch.Tensor, temp: torch.Tensor, zact: torch.Tensor) -> 
 
 
 class WorldModel(nn.Module):
-    def __init__(self, d: int = 128, layers: int = 4, heads: int = 4, ff: int = 256, mem: bool = False):
+    def __init__(self, d: int = 128, layers: int = 4, heads: int = 4, ff: int = 256, mem: bool = False,
+                 structured: bool = False):
         super().__init__()
         self.mem = mem
+        #Lorenzo Giannuzzo: with structured power each device predicts its own
+        #part, supervised by the simulator components: the zone token the heat of
+        #its reheat coil, the AHU token its fans and its cooling electricity, the
+        #HWS token pump, tank losses and the heat stored or released by the tank;
+        #gas is the (smoothly non-negative) sum of coils, losses and tank, as in
+        #the simulated boiler, and electricity the sum of fans, cooling and pump.
+        self.structured = structured
         self.enc_zone = nn.Sequential(nn.Linear(ZONE_IN + (MEM_IN if mem else 0), d), nn.GELU(), nn.Linear(d, d))
         self.enc_ahu = nn.Sequential(nn.Linear(AHU_IN, d), nn.GELU(), nn.Linear(d, d))
         self.enc_hws = nn.Sequential(nn.Linear(HWS_IN, d), nn.GELU(), nn.Linear(d, d))
@@ -132,8 +140,8 @@ class WorldModel(nn.Module):
         #sensors and an electric share; HWS head its next sensors plus pump
         #electricity and boiler standby gas.
         self.head_zone = nn.Linear(d, 1 + len(ZONE_DYN) + 1)
-        self.head_ahu = nn.Linear(d, len(AHU_DYN) + 1)
-        self.head_hws = nn.Linear(d, 7 + 2)
+        self.head_ahu = nn.Linear(d, len(AHU_DYN) + (2 if structured else 1))
+        self.head_hws = nn.Linear(d, 7 + (3 if structured else 2))
 
     def forward(self, zin, ain, hin, gin, rel):
         """Inputs are (B, V, ZONE_IN), (B, K, AHU_IN), (B, HWS_IN), (B, GLOB_IN)."""
@@ -150,6 +158,20 @@ class WorldModel(nn.Module):
         oz = self.head_zone(x[:, :v])
         oa = self.head_ahu(x[:, v:v + k])
         oh = self.head_hws(x[:, v + k])
+        if self.structured:
+            reheat = F.softplus(oz[..., -1])  # (B, V)
+            fan, cool = F.softplus(oa[..., -2]), F.softplus(oa[..., -1])  # (B, K)
+            pump, loss, tank = F.softplus(oh[:, -3]), F.softplus(oh[:, -2]), oh[:, -1]
+            elec = (fan.sum(1) + cool.sum(1) + pump) / k
+            gas = F.softplus(reheat.sum(1) + loss + tank, beta=200.0) / k
+            return {
+                "dtemp": oz[..., 0],
+                "zone_dyn": oz[..., 1:1 + len(ZONE_DYN)],
+                "ahu_dyn": oa[..., :-2],
+                "hws": oh[:, :7],
+                "power": torch.stack([elec, gas], -1),
+                "comp": {"reheat": reheat, "fan": fan, "cool": cool, "pump": pump, "loss": loss, "tank": tank},
+            }
         elec = (F.softplus(oa[..., -1]).sum(1) + F.softplus(oh[:, -2])) / k
         gas = (F.softplus(oz[..., -1]).sum(1) + F.softplus(oh[:, -1])) / k
         return {

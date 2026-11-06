@@ -56,11 +56,24 @@ def _step_losses(ro, ep, norm, t, state, w_power, w_comfort, zone_boost):
     l_ahu = ((out["ahu_dyn"] - at) ** 2).mean()
     l_hws = ((out["hws"] - ht) ** 2).mean()
     l_pow = ((out["power"] - ep.power[t]) ** 2).mean()
-    loss = l_temp + w_comfort * l_comf + 0.3 * (l_zone + l_ahu + l_hws) + w_power * l_pow
-    return state, loss, torch.stack([l_temp, l_comf, l_zone, l_ahu, l_hws, l_pow])
+    #Lorenzo Giannuzzo: with structured power each device is supervised by its
+    #simulated component; device errors are summed per building and divided by
+    #the number of AHUs, the units of the total power, so that the parts weigh
+    #like the totals and the model cannot shift energy between devices.
+    l_comp = torch.zeros(())
+    if "comp" in out and ep.comp is not None:
+        k = ep.schema.num_ahus
+        c, pc = ep.comp, out["comp"]
+        for key in ("reheat", "fan", "cool"):
+            l_comp = l_comp + (((pc[key] - c[key][t]) / k) ** 2).sum(-1).mean()
+        for key in ("pump", "loss", "tank"):
+            l_comp = l_comp + (((pc[key] - c[key][t]) / k) ** 2).mean()
+    loss = l_temp + w_comfort * l_comf + 0.3 * (l_zone + l_ahu + l_hws) + w_power * (l_pow + l_comp)
+    return state, loss, torch.stack([l_temp, l_comf, l_zone, l_ahu, l_hws, l_pow, l_comp]), out["power"]
 
 
-def unroll_loss(model, norm, ep, t0, length, w_power=10.0, w_comfort=1.0, zone_boost=3.0, checkpoint=None):
+def unroll_loss(model, norm, ep, t0, length, w_power=10.0, w_comfort=1.0, zone_boost=3.0, checkpoint=None,
+                w_hourly=0.0):
     from torch.utils.checkpoint import checkpoint as ckpt
 
     #Lorenzo Giannuzzo: long unrolls (beyond 4 h) recompute each step in the
@@ -70,17 +83,30 @@ def unroll_loss(model, norm, ep, t0, length, w_power=10.0, w_comfort=1.0, zone_b
     ro = Rollout(model, norm, ep)
     state = ro.init_state(t0)
     total = 0.0
-    acc = torch.zeros(6)
+    acc = torch.zeros(8)
+    preds = []
     for i in range(length):
         t = t0 + i
         if checkpoint:
-            state, loss, terms = ckpt(_step_losses, ro, ep, norm, t, state, w_power, w_comfort, zone_boost,
-                                      use_reentrant=False)
+            state, loss, terms, pw = ckpt(_step_losses, ro, ep, norm, t, state, w_power, w_comfort, zone_boost,
+                                          use_reentrant=False)
         else:
-            state, loss, terms = _step_losses(ro, ep, norm, t, state, w_power, w_comfort, zone_boost)
+            state, loss, terms, pw = _step_losses(ro, ep, norm, t, state, w_power, w_comfort, zone_boost)
         total = total + loss / length
-        acc += terms.detach() / length
-    parts = dict(zip(("temp", "comfort", "zone", "ahu", "hws", "power"), acc.tolist()))
+        acc[:7] += terms.detach() / length
+        preds.append(pw)
+    #Lorenzo Giannuzzo: error of the hourly mean power, so that sustained
+    #moderate loads weigh as much as their energy, next to the step-wise error
+    #dominated by the start-up peaks and by the 5-minute oscillations.
+    if w_hourly > 0 and length >= 12:
+        n = length // 12 * 12
+        pred = torch.stack(preds[:n], 1).reshape(len(t0), n // 12, 12, 2).mean(2)
+        idx = t0.unsqueeze(1) + torch.arange(n)
+        true = ep.power[idx].reshape(len(t0), n // 12, 12, 2).mean(2)
+        l_hour = ((pred - true) ** 2).mean()
+        total = total + w_hourly * l_hour
+        acc[7] = l_hour.detach()
+    parts = dict(zip(("temp", "comfort", "zone", "ahu", "hws", "power", "components", "hourly"), acc.tolist()))
     return total, parts
 
 
@@ -182,6 +208,10 @@ def main():
     ap.add_argument("--lengths", type=int, nargs="+", default=None,
                     help="unroll-length curriculum in equal shares (default 1, 6, 12, 24 schedule)")
     ap.add_argument("--w-comfort", type=float, default=1.0)
+    ap.add_argument("--structured", action="store_true",
+                    help="structured power heads supervised by the simulator components (sbwm.components)")
+    ap.add_argument("--w-hourly", type=float, default=0.0,
+                    help="weight of the error on the hourly mean power (unrolls of 1 h or longer)")
     ap.add_argument("--mem", action="store_true",
                     help="long memory per zone (exponential averages of temperature, commands and outdoor air)")
     args = ap.parse_args()
@@ -207,10 +237,24 @@ def main():
     print(f"train files {len(train_files)} (in memory {len(train)}) + emphasis "
           f"{len(focus.files) if focus else 0} | test {len(test)}", flush=True)
 
-    model = WorldModel(d=args.d, layers=args.layers, mem=args.mem)
+    model = WorldModel(d=args.d, layers=args.layers, mem=args.mem, structured=args.structured)
     if init:
         sd = init["model"]
         own = model.state_dict()
+        #Lorenzo Giannuzzo: a model with total power heads initializes one with
+        #structured heads: the AHU electric output starts the fans (cooling near 0),
+        #the HWS pump and standby outputs start pump and losses, the tank term
+        #starts at zero.
+        if own["head_ahu.weight"].shape[0] > sd["head_ahu.weight"].shape[0]:
+            sd = dict(sd)
+            for name in ("weight", "bias"):
+                a = sd[f"head_ahu.{name}"]
+                #the cooling output starts from the old electric row shifted down
+                #(softplus about 0), so the starting electricity is unchanged
+                extra = a[-1:].clone() if name == "weight" else a[-1:] - 6.0
+                sd[f"head_ahu.{name}"] = torch.cat([a, extra], 0)
+                h = sd[f"head_hws.{name}"]
+                sd[f"head_hws.{name}"] = torch.cat([h, torch.zeros_like(h[-1:])], 0)
         #Lorenzo Giannuzzo: a model without memory initializes one with memory;
         #the memory inputs start with zero weights, so the starting model is
         #exactly the old one and learns to use the memory during fine-tuning.
@@ -241,7 +285,7 @@ def main():
         batch = args.batch if length < 12 else max(8, min(args.batch, int(args.batch * 40 / ep.schema.num_zones)))
         t0 = torch.as_tensor(rng.integers(HIST + 2, hi, batch))
         loss, parts = unroll_loss(model, norm, ep, t0, length,
-                                  w_comfort=args.w_comfort, zone_boost=args.zone_boost)
+                                  w_comfort=args.w_comfort, zone_boost=args.zone_boost, w_hourly=args.w_hourly)
         opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

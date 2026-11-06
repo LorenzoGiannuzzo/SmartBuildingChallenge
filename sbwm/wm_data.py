@@ -59,6 +59,10 @@ class Episode:
     reward: torch.Tensor  # (T,)
     reward_meta: dict
     sched: tuple = (6.0, 19.0)  # morning and evening comfort hours from the metadata
+    #Lorenzo Giannuzzo: power components (episodes collected with sbwm.components),
+    #in the units of the structured heads: per zone and per AHU, not divided by
+    #the number of AHUs; None for older episodes, which train the totals only.
+    comp: dict | None = None  # reheat (T, V), fan (T, K), cool (T, K), pump (T,), loss (T,), tank (T,)
 
     @property
     def length(self) -> int:
@@ -123,13 +127,21 @@ def load_episode(path: Path) -> Episode:
     coef = np.stack([z["elec_cost_w"], z["gas_cost_w"], z["elec_co2_w"], z["gas_co2_w"]], -1)
 
     t = lambda a: torch.as_tensor(np.nan_to_num(np.asarray(a, np.float32)))
+    comp = None
+    if "zone_reheat_w" in z.files:
+        reheat = z["zone_reheat_w"].astype(np.float32)
+        loss = z["boiler_loss_w"].astype(np.float32)
+        comp = {"reheat": t(reheat / GAS_SCALE_PER_AHU), "fan": t(z["ahu_fan_w"] / ELEC_SCALE_PER_AHU),
+                "cool": t(np.abs(z["ahu_cool_w"]) / ELEC_SCALE_PER_AHU), "pump": t(z["pump_w"] / ELEC_SCALE_PER_AHU),
+                "loss": t(loss / GAS_SCALE_PER_AHU),
+                "tank": t((z["gas_w"] - reheat.sum(-1) - loss) / GAS_SCALE_PER_AHU)}
     return Episode(
         name=path.name, schema=schema, static=t(static), zobs=t(zobs), aobs=t(aobs),
         hobs=t(hobs), gobs=t(gobs), temp=t(z["zone_temp"]), occ=t(z["zone_occ"]),
         hsp=t(z["zone_hsp"]), csp=t(z["zone_csp"]), zact=t(zact), aact=t(aact),
         hact=t(hact), power=t(power), coef=t(coef.astype(np.float64) * 1e6),
         reward=t(z["reward"]), reward_meta=header["reward"],
-        sched=(float(meta["morning_start_hour"]), float(meta["evening_start_hour"])))
+        sched=(float(meta["morning_start_hour"]), float(meta["evening_start_hour"])), comp=comp)
 
 
 @dataclass
