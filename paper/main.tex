@@ -357,7 +357,7 @@ The three world models of Figure~\ref{fig:analysis} reach similar errors over 24
 \label{fig:analysis}
 \end{figure}
 
-As can be observed in Figure~\ref{fig:analysis}(a), the training seed weighs as much as the choice of world model and horizon, since the recipe of the final policy scores 0.0103 with one seed and 0.0345 with another, and the recipe on WM-3 with a 24 to 48-hour horizon and $\gamma = 0.999$ yields 0.0104 in two of three seeds. Moreover, Figures~\ref{fig:analysis}(b) and (c) show that all three world models underestimate the discomfort by about half in Phoenix and Singapore and overestimate it by more than 40\% in Fairbanks, while they overestimate the energy, especially in Atlanta and Phoenix, so that their aggregate calibration on comfort (1.00 to 1.08) hides opposite errors across climates, which a single comfort factor $\kappa$ cannot compensate. The policy on WM-2 is worse than that on WM-1 (0.0121 against 0.0106), mainly in the comfort of the warm climates, where WM-2 overestimates the energy more, yet WM-3, with similar errors, yields the best policies, so that these world models differ less than the seeds.
+As can be observed in Figure~\ref{fig:analysis}(a), the training seed weighs as much as the choice of world model, since the recipe of the final policy scores 0.0103 with one seed and 0.0345 with another, and the recipe on WM-3 with a 24 to 48-hour horizon and $\gamma = 0.999$ yields 0.0104 in two of three seeds. Moreover, Figures~\ref{fig:analysis}(b) and (c) show that all three world models underestimate the discomfort by about half in Phoenix and Singapore and overestimate it by more than 40\% in Fairbanks, while they overestimate the energy, especially in Atlanta and Phoenix, so that their aggregate calibration on comfort (1.00 to 1.08) hides opposite errors across climates, which a single comfort factor $\kappa$ cannot compensate. The policy on WM-2 is worse than that on WM-1 (0.0121 against 0.0106), mainly in the comfort of the warm climates, where WM-2 overestimates the energy more, yet WM-3, with similar errors, yields the best policies, so that these world models differ less than the seeds.
 
 \subsection{Remaining Headroom}
 \label{sec:headroom}
@@ -376,7 +376,7 @@ To bound the gain of better hourly decisions, the final policy is run for 7 days
 
 \section{Conclusion}
 
-This work has shown that a single policy for unseen buildings can be trained by differentiating the competition reward through closed-loop rollouts of an entity-token world model, reducing the PID score by 83\%. Since the remaining loss is concentrated in the subarctic climate and an oracle still recovers about 30\% of it in a cold and a mild scenario, future work will address the power of each zone coil and air handler, so that heat goes only where needed, and fast planning.
+This work has shown that a single policy for unseen buildings can be trained by differentiating the competition reward through rollouts of an entity-token world model, reducing the PID score by 83\%. Since the remaining loss is concentrated in the subarctic climate and an oracle still recovers about 30\% of it in a cold and a mild scenario, future work will address the power of each zone coil and air handler, so that heat goes only where needed, and fast planning.
 
 \paragraph{Acknowledgments.} To be completed.
 

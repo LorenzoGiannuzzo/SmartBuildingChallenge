@@ -51,7 +51,7 @@ STAGES = [("pid_water", "PID\nBaseline", None),
           ("v11_base_f03", "+ Calibrated\nWorld Model", None),
           ("v11_long_fit3", "+ 12-24 h Horizon\n& Filter In\nTraining", 0.013),
           ("v14_new2wm", "+ 48 h World\nModel & Two\nWorld Models", None)]
-C_COMFORT, C_ENERGY = "#f57c00", "#3a1458"
+C_COMFORT, C_ENERGY = "#1b5e20", "#66bb6a"
 
 
 def scores(key="mean_reward"):
@@ -102,13 +102,12 @@ def fig_impact():
     clim = list(CLIMATES)
     m = np.array([[np.mean([v for sc, v in tot[k].items() if f"/{c}_" in sc]) for k in keys] for c in clim])
     ratio = m / m[:, :1]
-    #Lorenzo Giannuzzo: the dark part of the magma scale up to a strong orange
-    #in the middle, ending on a light orange.
+    #Lorenzo Giannuzzo: the dark part of the magma scale, ending on a strong
+    #orange instead of the pale yellow of the full scale.
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
     mag = plt.get_cmap("magma")
-    cmap = LinearSegmentedColormap.from_list("magma_orange", [(0.0, mag(0.0)), (0.25, mag(0.3)),
-                                                              (0.5, to_rgb("#f57c00")),
-                                                              (1.0, to_rgb("#ffd59e"))])
+    cmap = LinearSegmentedColormap.from_list("magma_orange", [mag(0.0), mag(0.2), mag(0.4), mag(0.58),
+                                                              to_rgb("#f57c00")])
     im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=0.0, vmax=0.6,
                     extent=(-0.5, len(keys) - 0.5, len(clim) - 0.5, -0.5))
     for i in range(len(clim)):
@@ -147,7 +146,7 @@ def fig_analysis():
                ("World\nModels\n3 & 2\n12-24 h", ["v14_new2wm", "v16_k18_s1"])]
     wms = [("wm_v11", "World Model 1", C_OLD), ("wm_v12", "World Model 2", C_KAGGLE),
            ("wm_v14", "World Model 3", C_NEW)]
-    fig, axes = plt.subplots(1, 3, figsize=(5.6, 1.8), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
+    fig, axes = plt.subplots(1, 3, figsize=(5.6, 2.05), gridspec_kw={"width_ratios": [1.05, 1.2, 1.2]})
     ax = axes[0]
     for i, (lab, ks) in enumerate(recipes):
         v = [mean[k] for k in ks]
@@ -208,7 +207,7 @@ def fig_headroom():
     series = [("Oracle With Simulator", "#7b2d8e", [orc[s] / base[s] for s, _ in scen]),
               ("Planner With World Model 3", "#ff8c00", [pl[("naive", s)] / base[s] for s, _ in scen]),
               ("Planner With World Models 1-3", "#2166ac", [pl[("safe", s)] / base[s] for s, _ in scen])]
-    fig, ax = plt.subplots(figsize=(5.6, 1.5))
+    fig, ax = plt.subplots(figsize=(5.6, 1.35))
     w = 0.24
     for j, (lab, col, v) in enumerate(series):
         bars = ax.bar(np.arange(len(scen)) + (j - 1) * w, v, w, color=col, edgecolor="black", lw=0.4, label=lab)
