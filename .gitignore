@@ -60,3 +60,5 @@ results/bench30.json
 results/official30_7d.json
 results/bench2.json
 kaggle/sbwm-policy-*.zip
+paper/*.fdb_latexmk
+paper/*.fls
