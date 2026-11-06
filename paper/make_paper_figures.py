@@ -51,7 +51,7 @@ STAGES = [("pid_water", "PID\nBaseline", None),
           ("v11_base_f03", "+ Calibrated\nWorld Model", None),
           ("v11_long_fit3", "+ 12-24 h Horizon\n& Filter In\nTraining", 0.013),
           ("v14_new2wm", "+ 48 h World\nModel & Two\nWorld Models", None)]
-C_COMFORT, C_ENERGY = "#f57c00", "#5e2a84"
+C_COMFORT, C_ENERGY = "#f57c00", "#3a1458"
 
 
 def scores(key="mean_reward"):
@@ -75,7 +75,7 @@ def fig_impact():
     total = np.array([np.mean(list(tot[k].values())) for k in keys])
     comfort = np.array([np.mean(list(com[k].values())) for k in keys])
     x = np.arange(len(keys))
-    fig = plt.figure(figsize=(5.6, 2.55))
+    fig = plt.figure(figsize=(5.6, 2.9))
     gs = fig.add_gridspec(2, 1, height_ratios=[1.35, 1.0], hspace=0.08)
     ax = fig.add_subplot(gs[0])
     b1 = ax.bar(x, comfort, 0.56, color=C_COMFORT, edgecolor="black", lw=0.4, label="Comfort")
@@ -102,12 +102,13 @@ def fig_impact():
     clim = list(CLIMATES)
     m = np.array([[np.mean([v for sc, v in tot[k].items() if f"/{c}_" in sc]) for k in keys] for c in clim])
     ratio = m / m[:, :1]
-    #Lorenzo Giannuzzo: the dark part of the magma scale, ending on a strong
-    #orange instead of the pale yellow of the full scale.
+    #Lorenzo Giannuzzo: the dark part of the magma scale up to a strong orange
+    #in the middle, ending on a light orange.
     from matplotlib.colors import LinearSegmentedColormap, to_rgb
     mag = plt.get_cmap("magma")
-    cmap = LinearSegmentedColormap.from_list("magma_orange", [mag(0.0), mag(0.2), mag(0.4), mag(0.58),
-                                                              to_rgb("#f57c00")])
+    cmap = LinearSegmentedColormap.from_list("magma_orange", [(0.0, mag(0.0)), (0.25, mag(0.3)),
+                                                              (0.5, to_rgb("#f57c00")),
+                                                              (1.0, to_rgb("#ffd59e"))])
     im = axh.imshow(ratio, cmap=cmap, aspect="auto", vmin=0.0, vmax=0.6,
                     extent=(-0.5, len(keys) - 0.5, len(clim) - 0.5, -0.5))
     for i in range(len(clim)):
@@ -205,7 +206,7 @@ def fig_headroom():
     #Lorenzo Giannuzzo: scores relative to the final policy in the same
     #scenario, so that the three climates share one scale.
     series = [("Oracle With Simulator", "#7b2d8e", [orc[s] / base[s] for s, _ in scen]),
-              ("Planner With World Model 3", "#3fd8b8", [pl[("naive", s)] / base[s] for s, _ in scen]),
+              ("Planner With World Model 3", "#ff8c00", [pl[("naive", s)] / base[s] for s, _ in scen]),
               ("Planner With World Models 1-3", "#2166ac", [pl[("safe", s)] / base[s] for s, _ in scen])]
     fig, ax = plt.subplots(figsize=(5.6, 1.5))
     w = 0.24
@@ -238,7 +239,7 @@ def fig_examples():
              "v14_new2wm": ("Final Policy", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.25), sharex="col",
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 4.0), sharex="col",
                              gridspec_kw={"height_ratios": [0.75, 1.35, 1.05]})
     out = {}
     for c, (scen, title) in enumerate(cases):
@@ -292,8 +293,8 @@ def fig_examples():
         ax.grid(lw=0.4, alpha=0.5)
         ax.set_axisbelow(True)
     labels = [lab for lab, _ in names.values()] + ["Median Heating Setpoint"]
-    fig.tight_layout(rect=(0, 0, 1, 0.92))
-    legend_top(fig, handles + [hs], labels, ncol=4, y=0.92, fig=True)
+    fig.tight_layout(rect=(0, 0, 1, 0.945))
+    legend_top(fig, handles + [hs], labels, ncol=4, y=0.945, fig=True)
     fig.savefig(OUT / "examples.pdf", bbox_inches="tight")
     plt.close(fig)
     return out
