@@ -142,6 +142,7 @@ def prerun(scenario: Path, start: str, weights: str, steps: int):
         rec.add_obs(obs)
         if term or trunc:
             break
+    rec.meta = meta
     return rec.episode(scenario, start, meta), rec
 
 
@@ -162,19 +163,28 @@ def _modify_policy_space(zact, aact, hact, cands):
 
 
 @torch.no_grad()
-def score_candidates(net, models, norm, ep, t0: int, cands, every: int, horizon: int) -> np.ndarray:
-    """Reward summed over the horizon for each candidate, averaged over the world models."""
+def _apply_bias(state, new_temp, bias):
+    """Adds the per-zone drift correction (K per step) to a predicted step."""
+    new_temp = new_temp + bias
+    state["temp_hist"] = torch.cat([new_temp.unsqueeze(1), state["temp_hist"][:, 1:]], 1)
+    return new_temp
+
+
+@torch.no_grad()
+def score_candidates(net, models, norm, ep, t0: int, cands, every: int, horizon: int, biases=None) -> np.ndarray:
+    """Reward summed over the horizon for each candidate (M, N), one row per world model."""
     from sbwm.train_dpc import policy_step
     from sbwm.train_wm import reward_from
     from sbwm.world_model import Rollout
 
     n = len(cands)
     h = min(horizon, ep.length - t0)
-    total = torch.zeros(n)
-    for m in models:
+    out_all = []
+    for mi, m in enumerate(models):
         ro = Rollout(m, norm, ep)
         tt = torch.full((n,), t0, dtype=torch.long)
         state = ro.init_state(tt)
+        total = torch.zeros(n)
         for k in range(h):
             t = tt + k
             carry = {}
@@ -183,8 +193,48 @@ def score_candidates(net, models, norm, ep, t0: int, cands, every: int, horizon:
                 zact, aact, hact = _modify_policy_space(zact, aact, hact, cands)
             state, out, new_temp = ro.step(state, t, zact, aact, hact)
             state.update(carry)
+            if biases is not None:
+                new_temp = _apply_bias(state, new_temp, biases[mi])
             total += reward_from(ep, t, new_temp, out["power"])
-    return (total / len(models)).numpy()
+        out_all.append(total)
+    return torch.stack(out_all).numpy()
+
+
+@torch.no_grad()
+def replay_error(models, norm, ep, t: int, steps: int, biases=None) -> list[torch.Tensor]:
+    """Per-zone error (truth minus prediction, (V,) per model) of a replay of the
+    last ``steps`` logged actions from t - steps, with the current corrections."""
+    from sbwm.world_model import Rollout
+
+    errs = []
+    for mi, m in enumerate(models):
+        ro = Rollout(m, norm, ep)
+        tt = torch.tensor([t - steps])
+        state = ro.init_state(tt)
+        for k in range(steps):
+            i = tt + k
+            state, out, new_temp = ro.step(state, i, ep.zact[i], ep.aact[i], ep.hact[i])
+            if biases is not None:
+                new_temp = _apply_bias(state, new_temp, biases[mi])
+        errs.append(ep.temp[t - 1] - new_temp[0])
+    return errs
+
+
+def choose(scores: np.ndarray, agree: bool) -> int:
+    """Index of the candidate to apply; 0 is the policy.
+
+    With ``agree`` a candidate replaces the policy only when every world model
+    predicts it to be better than the policy, and among those the one with the
+    largest mean gain is taken.
+    """
+    if not agree or scores.shape[0] == 1:
+        return int(np.argmax(scores.mean(0)))
+    adv = scores - scores[:, :1]
+    ok = adv.min(0) > 0
+    if not ok.any():
+        return 0
+    mean = np.where(ok, adv.mean(0), -np.inf)
+    return int(np.argmax(mean))
 
 
 def _fill_row(ep, t: int, obs_row: np.ndarray, schema):
@@ -221,7 +271,7 @@ def _fill_step(ep, t: int, c: np.ndarray, d: np.ndarray, temp: list, schema):
 
 
 def run(scenario: Path, weights: str, wm_paths: list[str], steps: int, every: int, horizon: int,
-        n_cand: int, seed: int) -> dict:
+        n_cand: int, seed: int, agree: bool = False, correct: bool = False, gate: float = 0.0) -> dict:
     from sbwm.collect import _load_env
     from sbwm.policy import DPCPolicy
     from sbwm.schema import BuildingSchema
@@ -246,6 +296,15 @@ def run(scenario: Path, weights: str, wm_paths: list[str], steps: int, every: in
     rng = np.random.default_rng(seed)
     obs, _ = env.reset()
     rewards, comps, chosen, plan_s = [], [], [], 0.0
+    #Lorenzo Giannuzzo: online correction of each world model on this building:
+    #every hour the last hour is replayed with the logged actions and the
+    #per-zone error updates a drift added to every predicted step; its size
+    #also drives the safety gate, which hands control back to the policy
+    #when the corrected model still misses the last hour by more than ``gate``.
+    v = s.num_zones
+    biases = [torch.zeros(v) for _ in models] if correct else None
+    mae = None
+    gated = 0
     t = 0
     while t < steps:
         _fill_row(ep, t, np.asarray(obs, np.float32), s)
@@ -253,9 +312,18 @@ def run(scenario: Path, weights: str, wm_paths: list[str], steps: int, every: in
         best = 0
         if t >= 2:
             tp = time.time()
-            scores = score_candidates(net, models, norm, ep, t, cands, every, horizon)
+            if (correct or gate > 0) and t >= every + 4:
+                errs = replay_error(models, norm, ep, t, every, biases)
+                if correct:
+                    biases = [(b + 0.3 * e / every).clamp(-0.05, 0.05) for b, e in zip(biases, errs)]
+                m_now = float(np.mean([e.abs().mean() for e in errs]))
+                mae = m_now if mae is None else 0.8 * mae + 0.2 * m_now
+            if gate > 0 and mae is not None and mae > gate:
+                gated += 1
+            else:
+                scores = score_candidates(net, models, norm, ep, t, cands, every, horizon, biases)
+                best = choose(scores, agree)
             plan_s += time.time() - tp
-            best = int(np.argmax(scores))
         chosen.append(cands[best])
         for _ in range(min(every, steps - t)):
             _fill_row(ep, t, np.asarray(obs, np.float32), s)
@@ -285,6 +353,8 @@ def run(scenario: Path, weights: str, wm_paths: list[str], steps: int, every: in
             "mean_reward": float(np.mean(rewards)), "comfort": float(0.6 * c[:, 0].mean()),
             "energy": float(-0.2 * c[:, 1].mean()), "carbon": float(-0.2 * c[:, 2].mean()),
             "chosen": counts, "planning_seconds": plan_s, "prerun_seconds": t_pre,
+            "agree": agree, "correct": correct, "gate": gate, "gated_decisions": gated,
+            "replay_mae_1h": mae,
             "seconds": time.time() - t0}
 
 
@@ -300,6 +370,10 @@ def main():
     ap.add_argument("--candidates", type=int, default=31)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--agree", action="store_true", help="change the policy only when all world models agree")
+    ap.add_argument("--correct", action="store_true", help="online per-zone drift correction of the world models")
+    ap.add_argument("--gate", type=float, default=0.0,
+                    help="hand control back to the policy above this 1-hour replay error [K] (0 = off)")
     ap.add_argument("--out", default="results/wm_planner.json")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
@@ -307,7 +381,7 @@ def main():
     res = json.loads(out.read_text()) if out.exists() else []
     for sc in args.scenarios:
         r = run(Path(args.root) / sc, args.weights, args.wm, args.steps, args.every, args.horizon,
-                args.candidates, args.seed)
+                args.candidates, args.seed, args.agree, args.correct, args.gate)
         print(json.dumps({k: r[k] for k in ("scenario", "policy_alone", "mean_reward", "comfort", "energy",
                                              "carbon", "planning_seconds", "seconds")}), flush=True)
         res.append(r)
