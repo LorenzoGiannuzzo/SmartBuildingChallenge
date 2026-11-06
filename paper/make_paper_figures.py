@@ -122,7 +122,7 @@ def fig_examples():
              "v14_new2wm": ("Final Policy", C_NEW)}
     cases = [("building_train_1__fairbanks_1", "Fairbanks 1, Building 1"),
              ("building_train_2__denver_8", "Denver 8, Building 2")]
-    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.75), sharex="col",
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 2.6), sharex="col",
                              gridspec_kw={"height_ratios": [0.8, 1.35, 0.95]})
     out = {}
     for c, (scen, title) in enumerate(cases):
@@ -148,9 +148,9 @@ def fig_examples():
         ticks = np.arange(24, days[-1] + 1, 12)
         axes[2, c].set_xticks(ticks, [f"0\n{names_d[int(h // 24)]}" if h % 24 == 0 else "12\n" for h in ticks],
                               fontsize=6.5)
-    axes[0, 0].set_ylabel("Outdoor\nAir [°C]", fontsize=7.5)
-    axes[1, 0].set_ylabel("Zone Temperature,\n10th Percentile [°C]", fontsize=7.5)
-    axes[2, 0].set_ylabel("Natural Gas\nPower [kW]", fontsize=7.5)
+    axes[0, 0].set_ylabel("Outdoor\nAir [°C]", fontsize=7)
+    axes[1, 0].set_ylabel("Zone Air, 10th\nPercentile [°C]", fontsize=7)
+    axes[2, 0].set_ylabel("Gas\nPower [kW]", fontsize=7)
     fig.align_ylabels(axes[:, 0])
     for ax in axes.flat:
         ax.grid(lw=0.4, alpha=0.5)
