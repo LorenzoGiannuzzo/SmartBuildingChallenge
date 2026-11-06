@@ -35,5 +35,41 @@
   },
   "mean_gain_per_decision": 0.2267342665229244,
   "seconds": 6720.719246149063
+ },
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_1/phoenix_5",
+  "weights": "policies/v14_new2wm.pt",
+  "steps": 2016,
+  "every": 12,
+  "horizon": 288,
+  "candidates": 31,
+  "mean_reward": -0.013965514381203753,
+  "comfort": -0.0010106214413875745,
+  "energy": -0.010520361463260616,
+  "carbon": -0.0024345314704681646,
+  "chosen": {
+   "plant": {
+    "off": 27,
+    "on": 64,
+    "policy": 77
+   },
+   "water": {
+    "-0.5": 57,
+    "0.0": 110,
+    "1.0": 1
+   },
+   "supply": {
+    "-0.5": 95,
+    "0.0": 54,
+    "0.5": 19
+   },
+   "reheat": {
+    "-0.3": 83,
+    "0.0": 68,
+    "0.3": 17
+   }
+  },
+  "mean_gain_per_decision": 0.010498052300007957,
+  "seconds": 6777.04301738739
  }
 ]
