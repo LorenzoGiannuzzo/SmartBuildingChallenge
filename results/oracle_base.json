@@ -1,0 +1,44 @@
+[
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_1/fairbanks_1",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/v14_new2wm.pt",
+  "params": "",
+  "record": false,
+  "mean_reward": -0.05413402637704144,
+  "steps_done": 2016,
+  "comfort": -0.0084079083398094,
+  "energy": -0.01572863458217223,
+  "carbon": -0.02999748347105014,
+  "seconds": 158.05624413490295
+ },
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_1/phoenix_5",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/v14_new2wm.pt",
+  "params": "",
+  "record": false,
+  "mean_reward": -0.014945894014757212,
+  "steps_done": 2016,
+  "comfort": -0.0018018457290461733,
+  "energy": -0.010655846916971681,
+  "carbon": -0.002488201398328194,
+  "seconds": 158.68218636512756
+ },
+ {
+  "scenario": "smart_buildings/training_scenarios/building_train_2/denver_8",
+  "policy": "dpc",
+  "steps": 2016,
+  "weights": "policies/v14_new2wm.pt",
+  "params": "",
+  "record": false,
+  "mean_reward": -0.012095526826925156,
+  "steps_done": 2016,
+  "comfort": -0.005536812440654363,
+  "energy": -0.0025174653142650124,
+  "carbon": -0.0040412490733278865,
+  "seconds": 282.889456987381
+ }
+]
